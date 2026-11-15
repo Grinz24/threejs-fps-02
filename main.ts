@@ -1,32 +1,42 @@
-// A working threejs-fps-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files the browser loads as ES modules with three.js from an import
-// map, and the program hands it in. It copies game/ and screenshots/ from beside this file to
-// /output and writes /output/dossier.json, the summary the judge reads, with the vendored make.fun
-// library. A starting point, not a winner: a grey room, one rifle and four targets that drop when
-// shot. Build your game, put your PNG or JPEG screenshots in screenshots/ (the first by name is
-// the cover) and run it.
+// Entry point for the make.fun threejs-fps bounty (Node 22, standard library only).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// The playable game lives in game/ as static ES modules (three.js comes in through an import map), and
+// screenshots/ holds the PNG/JPEG shots, the first by name being the cover. This script stages both into
+// the output directory and then writes dossier.json there, the summary the judge reads, using the
+// vendored make.fun library.
+//
+// The grader runs it with /output; locally, point MAKEFUN_OUTPUT_DIR somewhere else:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// To play it in a browser, run `node serve.ts` and open http://localhost:8080.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-threejs.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const sourceRoot = dirname(fileURLToPath(import.meta.url));
+const outputRoot = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+/** Copies a directory beside this file into the output tree under the same name. */
+function stage(name: string, { required }: { required: boolean }): void {
+  const from = join(sourceRoot, name);
+  const to = join(outputRoot, name);
+  mkdirSync(to, { recursive: true });
+  if (required || existsSync(from)) cpSync(from, to, { recursive: true });
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all: game/ counts beside /output's own 1000-entry cap, its screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, { text_max_bytes: 163840, screenshots: { max: 4, max_bytes: 262144 }, game_max_files: 993, game_max_bytes: 50331648 }),
-);
+mkdirSync(outputRoot, { recursive: true });
+stage('game', { required: true });
+// screenshots/ is optional in the source tree, but the output always gets the directory.
+stage('screenshots', { required: false });
+
+// Limits mirror the scorer's gate: text_max_bytes is the only one that shapes the dossier's contents; the rest
+// make buildDossier refuse an entry the scorer would refuse anyway (over 4 screenshots or any over 256 KiB; over
+// 993 files or 48 MiB in game/, which shares /output's 1000-entry budget with screenshots/ and dossier.json).
+const dossier = buildDossier(outputRoot, {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+});
+writeFileSync(join(outputRoot, 'dossier.json'), dossier);
