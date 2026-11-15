@@ -186,7 +186,9 @@ export function createBots(sim) {
     const br = bot.brain;
     if (br.target !== target || br.lostFor > 1) {
       const slow = 1.35 - br.skill;
-      br.reaction = sim.rng.range(0.18, 0.42) * slow * (bot.blind > 0 ? 2 : 1);
+      // Someone holding a pre-aimed angle reacts faster than someone on the move.
+      const set = br.mode === MODE.HOLD || br.mode === MODE.POST ? 0.6 : 1;
+      br.reaction = sim.rng.range(0.18, 0.42) * slow * set * (bot.blind > 0 ? 2 : 1);
       br.errYaw = (sim.rng.next() - 0.5) * 0.3 * slow;
       br.errPitch = (sim.rng.next() - 0.5) * 0.16 * slow;
       br.headAim = sim.rng.chance(0.08 + br.skill * 0.22);

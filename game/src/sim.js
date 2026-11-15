@@ -134,12 +134,14 @@ export function createSim(seed, playerTeam) {
       actor.noiseAge += dt;
       actor.hurtAge += dt;
       actor.blind = Math.max(0, actor.blind - dt);
+      if (actor.cmd.drop && actor.hasBomb) round.dropBomb(actor, 1.6);
       if (actor.alive) stepActor(actor, dt, frozen);
       // One-shot presses are consumed by the step that saw them.
       actor.cmd.firePressed = false;
       actor.cmd.select = 0;
       actor.cmd.scope = false;
       actor.cmd.reload = false;
+      actor.cmd.drop = false;
       actor.cmd.buy = '';
     }
     separate(dt);
