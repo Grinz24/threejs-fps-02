@@ -277,6 +277,10 @@ export function buildMap(scene) {
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
+  // Shadowless bounce from the far side of the yard, so faces turned away from the sun still read their form.
+  const bounce = new THREE.DirectionalLight(new THREE.Color(PALETTE.terracotta), 0.9);
+  bounce.position.set(-SUN_DIRECTION.x, 0.25, -SUN_DIRECTION.z).multiplyScalar(90);
+  scene.add(bounce);
 
   const solid = createBatch();
   const ground = createBatch();

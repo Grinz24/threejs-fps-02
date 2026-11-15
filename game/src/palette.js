@@ -3,7 +3,7 @@
 export const PALETTE = {
   skyTop: '#3f6f93',
   skyHorizon: '#f3c48f',
-  sun: '#ffd8a1',
+  sun: '#ffbf80',
   fog: '#e7b98a',
   sand: '#c99f6e',
   sandDark: '#a9804f',
