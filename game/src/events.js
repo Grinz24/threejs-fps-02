@@ -24,6 +24,7 @@ export const EV = {
   PICKUP: 20, // actor
   DRY: 21,
   MATCH_END: 22, // a = winning team
+  CONTACT: 23, // actor = bot calling it, target = enemy seen, x y z where
 };
 
 const CAPACITY = 512;

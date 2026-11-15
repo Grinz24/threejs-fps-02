@@ -13,6 +13,10 @@ const HALF = CELL / 2;
 const BUILDING_TONES = [PALETTE.plaster, PALETTE.stone, PALETTE.stoneCap];
 const ACCENT_TONES = [PALETTE.terracotta, PALETTE.teal, PALETTE.plaster, PALETTE.stone];
 const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// Each site's own colour, on its paving, its boundary stripe and its stencilled letter.
+const SITE_TONES = { a: PALETTE.teal, b: PALETTE.terracotta };
+const STRIPE = 0.32;
+const THRESHOLD = '.,';
 const mix = new THREE.Color();
 const other = new THREE.Color();
 
@@ -132,13 +136,26 @@ function floorCell(batch, col, row, ch) {
   const z0 = cellZ(row) - HALF;
   const jitter = hash(col, row, 9);
   if (ch === 'a' || ch === 'b') {
-    const light = ch === 'a' ? PALETTE.stoneCap : PALETTE.plaster;
-    const dark = ch === 'a' ? PALETTE.stone : PALETTE.concrete;
+    // Site paving leans toward the site's colour, and a painted stripe runs along its edge.
+    const tone = SITE_TONES[ch];
+    const light = tinted(ch === 'a' ? PALETTE.stoneCap : PALETTE.plaster, tone, 0.2).getHex();
+    const dark = tinted(ch === 'a' ? PALETTE.stone : PALETTE.concrete, tone, 0.34).getHex();
     for (let k = 0; k < 4; k += 1) {
       const ox = (k & 1) * HALF;
       const oz = (k >> 1) * HALF;
       const checker = ((col * 2 + (k & 1) + row * 2 + (k >> 1)) & 1) === 0;
       batch.floor(x0 + ox, z0 + oz, x0 + ox + HALF, z0 + oz + HALF, 0.005, tinted(checker ? light : dark, PALETTE.sand, jitter * 0.25));
+    }
+    for (const [dc, dr] of SIDES) {
+      // Only where open ground meets the site: its thresholds, not its walls or props.
+      const n = col + dc;
+      const m = row + dr;
+      if (!isOpen(n, m) || !THRESHOLD.includes(tileAt(m * COLS + n))) continue;
+      const sx0 = dc === 1 ? x0 + CELL - STRIPE : x0;
+      const sz0 = dr === 1 ? z0 + CELL - STRIPE : z0;
+      const sx1 = dc === -1 ? x0 + STRIPE : x0 + CELL;
+      const sz1 = dr === -1 ? z0 + STRIPE : z0 + CELL;
+      batch.floor(sx0, sz0, sx1, sz1, 0.02, tone);
     }
   } else if (ch === ',') {
     batch.floor(x0, z0, x0 + CELL, z0 + CELL, 0.005, tinted(PALETTE.concrete, PALETTE.concreteDark, 0.2 + jitter * 0.4));
@@ -174,8 +191,8 @@ function siteDecal(scene, site) {
   canvas.width = 256;
   canvas.height = 256;
   const g = canvas.getContext('2d');
-  g.strokeStyle = PALETTE.terracotta;
-  g.fillStyle = PALETTE.terracotta;
+  g.strokeStyle = SITE_TONES[site.tile];
+  g.fillStyle = SITE_TONES[site.tile];
   g.lineWidth = 14;
   g.beginPath();
   g.arc(128, 128, 104, 0, Math.PI * 2);

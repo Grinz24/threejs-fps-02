@@ -1,7 +1,7 @@
 // The DOM HUD: score bar and clock, vitals and money, ammo and slots, a crosshair whose gap is
-// the real spread, hit and damage markers, charge prompts, banners, the kill feed and the
-// scoreboard. It reads the simulation, writes only the DOM, and touches an element only when
-// the value it shows has changed.
+// the real spread, hit and damage markers, charge prompts, banners, the kill feed, the team
+// radio's contact calls and the scoreboard. It reads the simulation, writes only the DOM, and
+// touches an element only when the value it shows has changed.
 import { TEAMS, SITES, CALLOUTS, RAIDERS, WARDENS } from './level.js';
 import { calloutAt, cellIndex } from './world.js';
 import { EV } from './events.js';
@@ -13,6 +13,7 @@ import { TEAM_SIZE } from './sim.js';
 
 const $ = (id) => document.getElementById(id);
 const FEED_TIME = 7;
+const RADIO_TIME = 3;
 const REASONS = ['All {loser} eliminated', 'The charge detonated', 'The charge was defused', 'Time ran out'];
 const teamClass = (team) => (team === RAIDERS ? 'raider' : 'warden');
 const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -42,6 +43,11 @@ export function createHud(sim) {
   const board = $('board');
   const moneyGain = $('money-gain');
   const ticks = $('crosshair').children;
+  // The team radio sits under the radar's location line.
+  const radio = $('radar-box').appendChild(document.createElement('div'));
+  radio.id = 'radio';
+  Object.assign(radio.style, { padding: '4px 2px 0', fontSize: '13px', fontWeight: '600', color: 'var(--accent)' });
+  const radioShown = shown(radio);
   const ui = {
     score: [text($('score-0')), text($('score-1'))],
     timer: text($('timer'), clock),
@@ -90,6 +96,9 @@ export function createHud(sim) {
   let boardTimer = 0;
   let lastMoney = -1;
   let lastViewer = null;
+  let radioTime = 0;
+  let radioPlace = '';
+  let radioCount = 0;
 
   function showBanner(title, copy, seconds, tone = '') {
     $('banner-title').textContent = title;
@@ -108,6 +117,17 @@ export function createHud(sim) {
     feed.appendChild(row);
     feedItems.push({ row, age: 0 });
     if (feedItems.length > 6) feedItems.shift().row.remove();
+  }
+
+  // A teammate bot just saw an enemy nobody on the team had eyes on: name the spot. Calls that
+  // land on the same spot while one is still up stack into a count instead of replacing it.
+  function contact(e) {
+    const place = CALLOUTS[calloutAt(cellIndex(e.x, e.z))]?.[0] ?? '';
+    radioCount = radioTime > 0 && place === radioPlace ? radioCount + 1 : 1;
+    radioPlace = place;
+    radioTime = RADIO_TIME;
+    const where = place ? `Contact at ${place}` : 'Contact';
+    radio.textContent = `${e.actor.name} · ${where}${radioCount > 1 ? ` ×${radioCount}` : ''}`;
   }
 
   function renderBoard(viewer) {
@@ -168,7 +188,10 @@ export function createHud(sim) {
         if (viewer && e.target === viewer) hurtFlash = 0.5;
       } else if (e.type === EV.KILL) {
         addFeed(e, viewer);
+      } else if (e.type === EV.CONTACT) {
+        if (viewer && e.actor.team === viewer.team) contact(e);
       } else if (e.type === EV.ROUND_START) {
+        radioTime = 0;
         showBanner(`Round ${round.number}`, round.number === 1 ? 'Pistol round. Press B to buy, then go.' : 'Buy time. Press B to open the buy menu.', 99);
         for (const item of feedItems) item.row.remove();
         feedItems.length = 0;
@@ -195,6 +218,8 @@ export function createHud(sim) {
       ui.roundLabel(round.phase + round.number * 8);
       bannerTime -= dt;
       if (bannerTime <= 0) banner.hidden = true;
+      radioTime -= dt;
+      radioShown(radioTime > 0);
       gainTime -= dt;
       if (gainTime <= 0) moneyGain.classList.remove('on');
       hitTime -= dt;

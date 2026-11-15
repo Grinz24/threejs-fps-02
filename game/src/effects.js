@@ -8,6 +8,9 @@ import { createBatch, vertexColored } from './batch.js';
 import { SMOKE_RADIUS, SMOKE_TIME } from './grenades.js';
 
 const PUFFS_PER_SMOKE = 16;
+// Long and thick enough to read as a streak, even in a still frame, without becoming a beam.
+const TRACER_LIFE = 0.1;
+const TRACER_WIDTH = 0.03;
 
 function softTexture() {
   const canvas = document.createElement('canvas');
@@ -84,7 +87,7 @@ export function createEffects(scene, sim) {
   const blood = spritePool(scene, 24, soft, THREE.NormalBlending);
 
   // Tracers: thin additive bars stretched from muzzle to impact.
-  const tracerGeometry = new THREE.BoxGeometry(0.018, 0.018, 1).translate(0, 0, 0.5);
+  const tracerGeometry = new THREE.BoxGeometry(TRACER_WIDTH, TRACER_WIDTH, 1).translate(0, 0, 0.5);
   const tracers = [];
   for (let i = 0; i < 24; i += 1) {
     const mesh = new THREE.Mesh(tracerGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.flash), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -170,7 +173,7 @@ export function createEffects(scene, sim) {
     t.mesh.scale.z = length * (1 - skip);
     t.mesh.material.opacity = 0.75;
     t.mesh.visible = true;
-    t.life = 0.06;
+    t.life = TRACER_LIFE;
   }
 
   function hole(e) {
@@ -239,7 +242,7 @@ export function createEffects(scene, sim) {
       for (const t of tracers) {
         if (t.life <= 0) continue;
         t.life -= dt;
-        t.mesh.material.opacity = Math.max(0, t.life / 0.06) * 0.75;
+        t.mesh.material.opacity = Math.max(0, t.life / TRACER_LIFE) * 0.75;
         if (t.life <= 0) t.mesh.visible = false;
       }
       blastLife = Math.max(0, blastLife - dt);

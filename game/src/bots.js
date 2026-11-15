@@ -10,6 +10,7 @@ import { eyeHeight, RADIUS } from './movement.js';
 import { PHASE, DEFUSE_TIME, KIT_DEFUSE_TIME } from './round.js';
 import { heldGun, buy, canBuy, equip, equipGrenade, clearCmd } from './actors.js';
 import { SLOT_PRIMARY, SLOT_SECONDARY, SLOT_GRENADE, SLOT_BOMB } from './weapons.js';
+import { EV } from './events.js';
 
 const THINK = 0.1;
 const SIGHT_RANGE = 75;
@@ -19,6 +20,8 @@ const ARRIVE = 0.7;
 const STUCK_TIME = 1.1;
 const LOST_TIME = 2.6;
 const INTEL_TIME = 6;
+// A team calls out an enemy only once it has gone this long without anyone on it seeing them.
+const CONTACT_GAP = 4;
 const MODE = { ROUTE: 0, HOLD: 1, PLANT: 2, POST: 3, FETCH: 4, RETAKE: 5, INVESTIGATE: 6, SAVE: 7 };
 
 const wrap = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -42,6 +45,8 @@ export function createBots(sim) {
   for (const bot of bots) bot.brain = createBrain(sim.rng);
   // What each team knows: where an enemy was last spotted, and near which site.
   const intel = [{ site: -1, age: 99 }, { site: -1, age: 99 }];
+  // When each team last had eyes on each actor, by id: the rising edge of a sighting is a radio call.
+  const sighted = [new Float64Array(sim.actors.length), new Float64Array(sim.actors.length)];
   const dist = (bot, x, z) => Math.hypot(x - bot.body.x, z - bot.body.z);
   const yawTo = (bot, x, z) => Math.atan2(-(x - bot.body.x), -(z - bot.body.z));
 
@@ -77,6 +82,12 @@ export function createBots(sim) {
     }
   }
 
+  function callContact(bot, enemy) {
+    const last = sighted[bot.team];
+    if (sim.time - last[enemy.id] > CONTACT_GAP) sim.events.emit(EV.CONTACT, bot, enemy.body.x, enemy.body.y, enemy.body.z).target = enemy;
+    last[enemy.id] = sim.time;
+  }
+
   function remember(br, enemy) {
     br.lastX = enemy.body.x;
     br.lastY = enemy.body.y;
@@ -105,6 +116,7 @@ export function createBots(sim) {
 
   function planRound() {
     for (const team of intel) team.site = -1;
+    for (const team of sighted) team.fill(-CONTACT_GAP - 1);
     const raiders = bots.filter((b) => b.team === RAIDERS);
     const wardens = bots.filter((b) => b.team === WARDENS);
     const site = sim.rng.int(SITES.length);
@@ -499,7 +511,10 @@ export function createBots(sim) {
       const wobble = 0.045 * (1.25 - br.skill);
       br.errYaw += (sim.rng.next() - 0.5) * wobble;
       br.errPitch += (sim.rng.next() - 0.5) * wobble * 0.6;
-      if (seen) acquire(bot, seen);
+      if (seen) {
+        acquire(bot, seen);
+        callContact(bot, seen);
+      }
       else if (!br.target || br.lostFor > 0.4) hear(bot);
     }
     if (br.target && !br.target.alive) {
