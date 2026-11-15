@@ -165,6 +165,7 @@ function readPlayer(player) {
   if (input.took('Mouse0')) cmd.firePressed = true;
   if (input.took('Mouse2')) cmd.scope = true;
   if (input.took('KeyR')) cmd.reload = true;
+  if (input.took('KeyG')) cmd.drop = true;
   if (input.took('KeyQ')) cmd.select = player.lastSlot;
   for (const code in SLOT_KEYS) if (input.took(code)) cmd.select = SLOT_KEYS[code];
 }

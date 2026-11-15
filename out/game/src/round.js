@@ -64,8 +64,9 @@ export function createRound(sim) {
       slots[actor.team] += 1;
       respawn(actor, cellX(spawn[0]), cellZ(spawn[1]), actor.team === RAIDERS ? 0 : Math.PI);
     }
-    const raiders = sim.actors.filter((a) => a.team === RAIDERS);
-    const carrier = raiders[sim.rng.int(raiders.length)];
+    // The charge starts with a bot when there is one, so a new player is never the bottleneck.
+    const raiders = sim.actors.filter((a) => a.team === RAIDERS && a.isBot);
+    const carrier = raiders.length ? raiders[sim.rng.int(raiders.length)] : sim.actors.find((a) => a.team === RAIDERS);
     carrier.hasBomb = true;
     Object.assign(bomb, { state: 'carried', carrier, site: -1, timer: 0, plant: 0, defuse: 0, defuser: null, planter: null });
     sim.events.emit(EV.ROUND_START);
@@ -89,15 +90,14 @@ export function createRound(sim) {
     if (state.score[winner] >= ROUNDS_TO_WIN) state.matchWinner = winner;
   }
 
-  function dropBomb(actor) {
+  // Drop the charge at the carrier's feet, or tossed a step ahead when dropped on purpose.
+  function dropBomb(actor, toss = 0) {
     if (bomb.carrier !== actor) return;
+    const b = actor.body;
+    Object.assign(bomb, { state: 'dropped', carrier: null, x: b.x - Math.sin(b.yaw) * toss, y: b.y, z: b.z - Math.cos(b.yaw) * toss, plant: 0 });
     actor.hasBomb = false;
-    bomb.carrier = null;
-    bomb.state = 'dropped';
-    bomb.x = actor.body.x;
-    bomb.y = actor.body.y;
-    bomb.z = actor.body.z;
-    bomb.plant = 0;
+    actor.using = 0;
+    equipBest(actor);
   }
 
   function stepPlanting(dt) {

@@ -2,13 +2,13 @@
 // picture and whose eyes to see it through, then the same seed is replayed with the camera in
 // that actor so every effect, banner and kill feed line is the real one. Deterministic: the
 // same seed always stages the same frame.
-//   start: a Raider pushing out with teammates ahead, rifles bought, nobody in sight yet
+//   start: a Raider in the open with teammates ahead, rifles bought, nobody in sight yet
 //   play:  the instant of a rifle kill at fighting range
 //   end:   the next round's buy time with the buy menu open
 import { EV } from './events.js';
 import { PHASE, FREEZE_TIME } from './round.js';
 import { RAIDERS } from './level.js';
-import { clearLine } from './world.js';
+import { clearLine, tileAt, cellIndex } from './world.js';
 import { eyeHeight } from './movement.js';
 
 const LIMIT = 60 * 60 * 20;
@@ -44,8 +44,9 @@ function find(name, sim, step) {
     if (found) break;
     if (name === 'start' && round.number >= 2 && round.phase === PHASE.LIVE && round.elapsed > FREEZE_TIME + 3.5) {
       for (const a of sim.actors) {
-        if (!a.alive || a.team !== RAIDERS || !a.primary) continue;
-        if (count(sim, a, RAIDERS, 3, 22) >= 2 && count(sim, a, 1 - RAIDERS, 0, 80) === 0) {
+        if (!a.alive || a.team !== RAIDERS || !a.primary || tileAt(cellIndex(a.body.x, a.body.z)) === ',') continue;
+        const clear = sim.grenades.smokes.every((c) => !c.active || Math.hypot(c.x - a.body.x, c.z - a.body.z) > 30);
+        if (clear && count(sim, a, RAIDERS, 3, 22) >= 2 && count(sim, a, 1 - RAIDERS, 0, 80) === 0) {
           found = { steps: n, viewer: a.id };
           break;
         }
