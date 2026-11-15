@@ -27,7 +27,7 @@
   #game, #game canvas { position: fixed; inset: 0; display: block; }
   #hud { position: fixed; inset: 0; pointer-events: none; text-shadow: var(--shadow); user-select: none; }
   #hud[hidden] { display: none; }
-  .chip { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); backdrop-filter: blur(3px); }
+  .chip { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); }
   .raider { color: var(--raider); }
   .warden { color: var(--warden); }
 
@@ -130,7 +130,7 @@
   #board .num { text-align: right; }
 
   /* Buy menu */
-  #buy { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(12, 13, 16, 0.55); pointer-events: auto; }
+  #buy { position: fixed; inset: 0; display: grid; place-items: center; overflow-y: auto; background: rgba(12, 13, 16, 0.55); pointer-events: auto; }
   #buy[hidden] { display: none; }
   #buy .panel { width: min(1040px, 96vw); padding: 22px 24px; background: rgba(22, 24, 29, 0.94); }
   #buy header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
@@ -149,7 +149,7 @@
   #buy kbd { font: 11px var(--font-readout); color: var(--muted); }
 
   /* Panels */
-  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: linear-gradient(180deg, rgba(20,22,26,0.35), rgba(20,22,26,0.82)); }
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; overflow-y: auto; background: linear-gradient(180deg, rgba(20,22,26,0.35), rgba(20,22,26,0.82)); }
   .overlay[hidden] { display: none; }
   .card { width: min(560px, 100%); padding: 30px 32px; background: rgba(22, 24, 29, 0.92); border: 1px solid var(--hairline); border-radius: 10px; }
   .card h1 { margin: 0; font-size: 46px; line-height: 1; font-weight: 800; letter-spacing: 0.02em; }
@@ -168,6 +168,7 @@
   .keys kbd { display: inline-block; min-width: 22px; padding: 1px 5px; margin-right: 4px; border: 1px solid var(--hairline); border-radius: 4px; font: 11px var(--font-readout); color: var(--ink); text-align: center; }
   .card [hidden] { display: none; }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 900px), (max-height: 520px) { #hud { zoom: 0.62; } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition-duration: 0.01ms !important; } }
 </style>
 </head>

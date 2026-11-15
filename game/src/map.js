@@ -251,7 +251,7 @@ export function buildMap(scene) {
   const sun = new THREE.DirectionalLight(new THREE.Color(PALETTE.sun), 3.1);
   sun.position.copy(SUN_DIRECTION).multiplyScalar(90);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(2048, 2048);
   const extent = 62;
   Object.assign(sun.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 10, far: 200 });
   sun.shadow.bias = -0.0004;
@@ -290,11 +290,5 @@ export function buildMap(scene) {
   const farMesh = new THREE.Mesh(far.build(), vertexColored({ roughness: 1 }));
   scene.add(solidMesh, groundMesh, glowMesh, farMesh);
 
-  // A few warm fills where the roof keeps the sun out.
-  for (const [col, row] of [[4, 16], [4, 26], [14, 17], [10, 31]]) {
-    const lamp = new THREE.PointLight(new THREE.Color(PALETTE.lamp), 9, 11, 1.6);
-    lamp.position.set(cellX(col), ROOF_HEIGHT - 0.4, cellZ(row));
-    scene.add(lamp);
-  }
   for (const site of SITES) siteDecal(scene, site);
 }
