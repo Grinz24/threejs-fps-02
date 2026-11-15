@@ -37,7 +37,7 @@ function find(name, sim, step) {
       if (found) return;
       if (name === 'play' && e.type === EV.KILL && round.number >= 2 && e.actor && e.actor.alive && e.weapon === 'ridgeback') {
         const d = Math.hypot(e.actor.body.x - e.target.body.x, e.actor.body.z - e.target.body.z);
-        if (d > 7 && d < 26) found = { steps: n, viewer: e.actor.id };
+        if (d > 6 && d < 15) found = { steps: n, viewer: e.actor.id };
       }
       if (name === 'end' && e.type === EV.ROUND_END && round.number >= 3) roundEnded = true;
     });

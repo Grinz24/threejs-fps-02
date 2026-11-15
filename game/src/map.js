@@ -9,7 +9,9 @@ import { rects, cellX, cellZ, COLS, ROWS, tileAt, cellIndex } from './world.js';
 import { createBatch, vertexColored } from './batch.js';
 
 const HALF = CELL / 2;
-const BUILDING_TONES = [PALETTE.plaster, PALETTE.stone, PALETTE.terracotta, PALETTE.plaster, PALETTE.stone, PALETTE.teal];
+// Big blocks stay calm plaster and stone; small ones carry the terracotta and teal accents.
+const BUILDING_TONES = [PALETTE.plaster, PALETTE.stone, PALETTE.stoneCap];
+const ACCENT_TONES = [PALETTE.terracotta, PALETTE.teal, PALETTE.plaster, PALETTE.stone];
 const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const mix = new THREE.Color();
 const other = new THREE.Color();
@@ -33,7 +35,8 @@ function building(batch, glow, r) {
   const x1 = x0 + r.width * CELL;
   const z1 = z0 + r.depth * CELL;
   const h = r.height;
-  const tone = BUILDING_TONES[Math.floor(hash(r.col, r.row) * BUILDING_TONES.length)];
+  const tones = r.width * r.depth > 12 ? BUILDING_TONES : ACCENT_TONES;
+  const tone = tones[Math.floor(hash(r.col, r.row) * tones.length)];
   batch.box(x0, 0, z0, x1, h, z1, tone, 8);
   batch.box(x0 - 0.05, 0, z0 - 0.05, x1 + 0.05, 0.55, z1 + 0.05, PALETTE.stoneShade, 8);
   batch.box(x0 - 0.14, h, z0 - 0.14, x1 + 0.14, h + 0.32, z1 + 0.14, PALETTE.stoneCap, 8);

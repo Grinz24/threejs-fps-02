@@ -113,7 +113,9 @@ export function createEffects(scene, sim) {
   const clouds = sim.grenades.smokes.map((_, s) => {
     const puffs = [];
     for (let k = 0; k < PUFFS_PER_SMOKE; k += 1) {
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: soft, color: new THREE.Color(PALETTE.smoke), transparent: true, depthWrite: false }));
+      const tone = k % 3 === 0 ? PALETTE.concrete : k % 3 === 1 ? PALETTE.smoke : PALETTE.stoneCap;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: soft, color: new THREE.Color(tone), transparent: true, depthWrite: false }));
+      sprite.material.rotation = k * 1.3;
       sprite.visible = false;
       const a = k * 2.399 + s;
       const r = 0.35 + ((k * 7) % 10) / 10 * 0.6;
@@ -263,7 +265,7 @@ export function createEffects(scene, sim) {
           if (!s.active) continue;
           p.sprite.position.set(s.x + p.ox * r, s.y + p.oy * r * 0.8, s.z + p.oz * r);
           p.sprite.scale.setScalar(1 + r * 1.05);
-          p.sprite.material.opacity = 0.82 * fade;
+          p.sprite.material.opacity = 0.78 * fade;
         }
       }
 
