@@ -145,7 +145,9 @@ export function findPath(sx, sz, gx, gz, out, radius) {
     count += 1;
     i = j;
   }
-  out[count * 2] = gx;
-  out[count * 2 + 1] = gz;
+  // A goal inside a wall is replaced by the centre of the walkable cell nearest to it.
+  const snapped = goal !== cellIndex(gx, gz);
+  out[count * 2] = snapped ? cellX(goal % COLS) : gx;
+  out[count * 2 + 1] = snapped ? cellZ(Math.floor(goal / COLS)) : gz;
   return count + 1;
 }
