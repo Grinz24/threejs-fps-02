@@ -25,88 +25,43 @@ function arms(b, sleeve, right, left) {
   b.box(left[0] - 0.13, left[1] - 0.2, left[2] + 0.16, left[0] - 0.04, left[1] - 0.08, left[2] + 0.3, sleeve);
 }
 
+// Each model as x-symmetric boxes [half width, y0, z0, y1, z1, palette colour], the hands
+// (right, then left if two-handed), the muzzle's depth and how far it sits raised into view.
+const MODELS = {
+  rifle: { muzzle: -0.76, lift: 0, hands: [[0, -0.08, 0.04], [0, -0.05, -0.38]], parts: [
+    [0.032, -0.03, -0.26, 0.05, 0.12, 'metal'], [0.036, -0.035, -0.5, 0.03, -0.26, 'wood'], [0.012, 0, -0.74, 0.022, -0.5, 'gear'],
+    [0.018, 0.035, -0.46, 0.06, -0.42, 'gear'], [0.028, -0.16, -0.17, -0.03, -0.09, 'gear'], [0.028, -0.21, -0.15, -0.15, -0.06, 'gear'],
+    [0.026, -0.12, 0.02, -0.03, 0.08, 'wood'], [0.03, -0.06, 0.12, 0.04, 0.34, 'wood']] },
+  smg: { muzzle: -0.42, lift: 0, hands: [[0, -0.08, 0.03], [0, -0.05, -0.26]], parts: [
+    [0.032, -0.03, -0.24, 0.05, 0.1, 'metalLight'], [0.014, 0, -0.4, 0.026, -0.24, 'gear'], [0.022, -0.2, -0.13, -0.03, -0.08, 'gear'],
+    [0.025, -0.12, 0, -0.03, 0.06, 'gear'], [0.012, -0.02, 0.1, 0.02, 0.3, 'metal']] },
+  shotgun: { muzzle: -0.8, lift: 0, hands: [[0, -0.08, 0.04], [0, -0.07, -0.42]], parts: [
+    [0.034, -0.035, -0.2, 0.05, 0.1, 'metal'], [0.016, 0.005, -0.78, 0.037, -0.2, 'gear'], [0.02, -0.04, -0.72, -0.005, -0.2, 'gear'],
+    [0.034, -0.05, -0.5, 0, -0.34, 'wood'], [0.028, -0.12, 0.02, -0.03, 0.08, 'wood'], [0.03, -0.07, 0.1, 0.03, 0.34, 'wood']] },
+  sniper: { muzzle: -0.94, lift: 0, hands: [[0, -0.08, 0.06], [0, -0.05, -0.4]], parts: [
+    [0.034, -0.035, -0.3, 0.045, 0.14, 'tealDark'], [0.013, 0, -0.92, 0.024, -0.3, 'gear'], [0.03, 0.06, -0.24, 0.11, 0.02, 'gear'],
+    [0.036, 0.055, -0.3, 0.115, -0.24, 'metal'], [0.01, 0.045, -0.1, 0.06, -0.06, 'metal'], [0.024, -0.12, -0.1, -0.035, -0.04, 'gear'],
+    [0.026, -0.12, 0.04, -0.03, 0.1, 'tealDark'], [0.032, -0.07, 0.14, 0.05, 0.38, 'tealDark']] },
+  pistol: { muzzle: -0.22, lift: 0.06, hands: [[0, -0.08, 0.02], [-0.02, -0.1, 0]], parts: [
+    [0.022, 0, -0.2, 0.05, 0.02, 'metal'], [0.02, -0.12, -0.03, 0, 0.03, 'gear'], [0.006, 0.05, -0.19, 0.062, -0.17, 'gear']] },
+  knife: { muzzle: 0, lift: 0.04, hands: [[0, -0.02, 0.04]], parts: [
+    [0.012, -0.03, -0.26, 0.02, -0.04, 'metalLight'], [0.004, 0.02, -0.24, 0.03, -0.06, 'stoneCap'], [0.022, -0.04, -0.05, 0.03, 0.08, 'wood']] },
+  bomb: { muzzle: 0, lift: 0.05, hands: [[0.1, -0.06, -0.02], [-0.1, -0.06, -0.02]], parts: [
+    [0.1, -0.09, -0.2, 0.06, 0.02, 'wood'], [0.06, 0.06, -0.15, 0.075, -0.05, 'gear'], [0.04, 0.075, -0.13, 0.08, -0.08, 'blood']] },
+  grenade: { muzzle: 0, lift: 0.06, hands: [[0, -0.06, 0]], parts: [
+    [0.035, -0.06, -0.1, 0.05, -0.03, 'body'], [0.015, 0.05, -0.08, 0.08, -0.05, 'metal'], [0.006, -0.02, -0.035, 0.07, -0.025, 'metal']] },
+};
+const GRENADE_TONES = { frag: 'tealDark', flash: 'metalLight', smoke: 'concrete' };
+
 function buildModel(id, sleeve) {
+  const model = MODELS[WEAPONS[id]?.model ?? id] ?? MODELS.grenade;
   const b = createBatch();
-  let muzzle = -0.5;
-  let lift = 0;
-  const metal = PALETTE.metal;
-  const dark = PALETTE.gear;
-  switch (WEAPONS[id]?.model ?? id) {
-    case 'rifle':
-      b.box(-0.032, -0.03, -0.26, 0.032, 0.05, 0.12, metal);
-      b.box(-0.036, -0.035, -0.5, 0.036, 0.03, -0.26, PALETTE.wood);
-      b.box(-0.012, 0.0, -0.74, 0.012, 0.022, -0.5, dark);
-      b.box(-0.018, 0.035, -0.46, 0.018, 0.06, -0.42, dark);
-      b.box(-0.028, -0.16, -0.17, 0.028, -0.03, -0.09, dark);
-      b.box(-0.028, -0.21, -0.15, 0.028, -0.15, -0.06, dark);
-      b.box(-0.026, -0.12, 0.02, 0.026, -0.03, 0.08, PALETTE.wood);
-      b.box(-0.03, -0.06, 0.12, 0.03, 0.04, 0.34, PALETTE.wood);
-      arms(b, sleeve, [0, -0.08, 0.04], [0, -0.05, -0.38]);
-      muzzle = -0.76;
-      break;
-    case 'smg':
-      b.box(-0.032, -0.03, -0.24, 0.032, 0.05, 0.1, PALETTE.metalLight);
-      b.box(-0.014, 0.0, -0.4, 0.014, 0.026, -0.24, dark);
-      b.box(-0.022, -0.2, -0.13, 0.022, -0.03, -0.08, dark);
-      b.box(-0.025, -0.12, 0.0, 0.025, -0.03, 0.06, dark);
-      b.box(-0.012, -0.02, 0.1, 0.012, 0.02, 0.3, metal);
-      arms(b, sleeve, [0, -0.08, 0.03], [0, -0.05, -0.26]);
-      muzzle = -0.42;
-      break;
-    case 'shotgun':
-      b.box(-0.034, -0.035, -0.2, 0.034, 0.05, 0.1, metal);
-      b.box(-0.016, 0.005, -0.78, 0.016, 0.037, -0.2, dark);
-      b.box(-0.02, -0.04, -0.72, 0.02, -0.005, -0.2, dark);
-      b.box(-0.034, -0.05, -0.5, 0.034, 0.0, -0.34, PALETTE.wood);
-      b.box(-0.028, -0.12, 0.02, 0.028, -0.03, 0.08, PALETTE.wood);
-      b.box(-0.03, -0.07, 0.1, 0.03, 0.03, 0.34, PALETTE.wood);
-      arms(b, sleeve, [0, -0.08, 0.04], [0, -0.07, -0.42]);
-      muzzle = -0.8;
-      break;
-    case 'sniper':
-      b.box(-0.034, -0.035, -0.3, 0.034, 0.045, 0.14, PALETTE.tealDark);
-      b.box(-0.013, 0.0, -0.92, 0.013, 0.024, -0.3, dark);
-      b.box(-0.03, 0.06, -0.24, 0.03, 0.11, 0.02, dark);
-      b.box(-0.036, 0.055, -0.3, 0.036, 0.115, -0.24, metal);
-      b.box(-0.01, 0.045, -0.1, 0.01, 0.06, -0.06, metal);
-      b.box(-0.024, -0.12, -0.1, 0.024, -0.035, -0.04, dark);
-      b.box(-0.026, -0.12, 0.04, 0.026, -0.03, 0.1, PALETTE.tealDark);
-      b.box(-0.032, -0.07, 0.14, 0.032, 0.05, 0.38, PALETTE.tealDark);
-      arms(b, sleeve, [0, -0.08, 0.06], [0, -0.05, -0.4]);
-      muzzle = -0.94;
-      break;
-    case 'pistol':
-      b.box(-0.022, 0.0, -0.2, 0.022, 0.05, 0.02, id === 'hammer' ? PALETTE.metalLight : metal);
-      b.box(-0.02, -0.12, -0.03, 0.02, 0.0, 0.03, dark);
-      b.box(-0.006, 0.05, -0.19, 0.006, 0.062, -0.17, dark);
-      arms(b, sleeve, [0, -0.08, 0.02], [-0.02, -0.1, 0.0]);
-      muzzle = -0.22;
-      lift = 0.06;
-      break;
-    case 'knife':
-      b.box(-0.012, -0.03, -0.26, 0.012, 0.02, -0.04, PALETTE.metalLight);
-      b.box(-0.004, 0.02, -0.24, 0.004, 0.03, -0.06, PALETTE.stoneCap);
-      b.box(-0.022, -0.04, -0.05, 0.022, 0.03, 0.08, PALETTE.wood);
-      arms(b, sleeve, [0, -0.02, 0.04]);
-      lift = 0.04;
-      break;
-    case 'bomb':
-      b.box(-0.1, -0.09, -0.2, 0.1, 0.06, 0.02, PALETTE.wood);
-      b.box(-0.06, 0.06, -0.15, 0.06, 0.075, -0.05, dark);
-      b.box(-0.04, 0.075, -0.13, 0.04, 0.08, -0.08, PALETTE.blood);
-      arms(b, sleeve, [0.1, -0.06, -0.02], [-0.1, -0.06, -0.02]);
-      lift = 0.05;
-      break;
-    default: {
-      const tone = id === 'frag' ? PALETTE.tealDark : id === 'flash' ? PALETTE.metalLight : PALETTE.concrete;
-      b.box(-0.035, -0.06, -0.1, 0.035, 0.05, -0.03, tone);
-      b.box(-0.015, 0.05, -0.08, 0.015, 0.08, -0.05, PALETTE.metal);
-      b.box(0.015, -0.02, -0.08, 0.025, 0.07, -0.06, PALETTE.metal);
-      arms(b, sleeve, [0, -0.06, 0.0]);
-      lift = 0.06;
-    }
+  for (const [w, y0, z0, y1, z1, tone] of model.parts) {
+    const key = tone === 'body' ? GRENADE_TONES[id] : id === 'hammer' && tone === 'metal' ? 'metalLight' : tone;
+    b.box(-w, y0, z0, w, y1, z1, PALETTE[key]);
   }
-  return { geometry: b.build(), muzzle, lift };
+  arms(b, sleeve, model.hands[0], model.hands[1]);
+  return { geometry: b.build(), muzzle: model.muzzle, lift: model.lift };
 }
 
 function flashTexture() {
