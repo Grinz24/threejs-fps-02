@@ -12,7 +12,7 @@ export const MAX_MONEY = 16000;
 const SWITCH_TIME = 0.45;
 
 export function createCmd() {
-  return { forward: 0, strafe: 0, walk: false, crouch: false, jump: false, fire: false, firePressed: false, scope: false, reload: false, use: false, select: 0 };
+  return { forward: 0, strafe: 0, walk: false, crouch: false, jump: false, fire: false, firePressed: false, scope: false, reload: false, use: false, select: 0, buy: '' };
 }
 
 export function clearCmd(cmd) {
@@ -27,6 +27,7 @@ export function clearCmd(cmd) {
   cmd.reload = false;
   cmd.use = false;
   cmd.select = 0;
+  cmd.buy = '';
 }
 
 export function createActor(id, team, name, isBot) {

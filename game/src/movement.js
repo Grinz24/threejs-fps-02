@@ -5,9 +5,9 @@ import { footprintTop } from './world.js';
 
 export const RADIUS = 0.34;
 export const STAND_HEIGHT = 1.8;
-export const CROUCH_HEIGHT = 1.2;
+export const CROUCH_HEIGHT = 1.45;
 export const STAND_EYE = 1.64;
-export const CROUCH_EYE = 1.1;
+export const CROUCH_EYE = 1.26;
 export const RUN_SPEED = 5.4;
 const WALK_FACTOR = 0.52;
 const CROUCH_FACTOR = 0.36;

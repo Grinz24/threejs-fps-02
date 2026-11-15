@@ -5,7 +5,7 @@ import { createRng } from './rng.js';
 import { createEvents, EV } from './events.js';
 import { TEAMS } from './level.js';
 import { stepBody, groundSpeed, RUN_SPEED } from './movement.js';
-import { createActor, earn, heldGun } from './actors.js';
+import { createActor, earn, heldGun, buy } from './actors.js';
 import { applyDamage, stepArms } from './combat.js';
 import { createGrenades } from './grenades.js';
 import { createRound, PHASE } from './round.js';
@@ -128,6 +128,9 @@ export function createSim(seed, playerTeam) {
     const frozen = phase === PHASE.FREEZE || phase === PHASE.MATCH;
     sim.bots.step(dt);
     for (const actor of sim.actors) {
+      if (actor.cmd.buy && round.buyOpen(actor) && buy(actor, actor.cmd.buy)) {
+        sim.events.emit(EV.BUY, actor).weapon = actor.cmd.buy;
+      }
       actor.noiseAge += dt;
       actor.hurtAge += dt;
       actor.blind = Math.max(0, actor.blind - dt);
@@ -137,6 +140,7 @@ export function createSim(seed, playerTeam) {
       actor.cmd.select = 0;
       actor.cmd.scope = false;
       actor.cmd.reload = false;
+      actor.cmd.buy = '';
     }
     separate(dt);
     sim.grenades.step(dt);
