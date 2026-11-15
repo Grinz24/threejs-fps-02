@@ -25,45 +25,15 @@ const wrap = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
 
 function createBrain(rng) {
   return {
-    mode: MODE.HOLD,
-    base: MODE.HOLD,
-    path: new Float32Array(PATH_POINTS * 2),
-    pathLength: 0,
-    pathIndex: 0,
-    goalX: 0,
-    goalZ: 0,
-    holdX: 0,
-    holdZ: 0,
-    watchX: 0,
-    watchZ: 0,
-    route: null,
-    routeStep: 0,
-    siteIndex: 0,
-    target: null,
-    visible: false,
-    lostFor: 9,
-    lastX: 0,
-    lastY: 0,
-    lastZ: 0,
-    reaction: 0,
-    errYaw: 0,
-    errPitch: 0,
-    burst: 0,
-    pause: 0,
-    strafe: 1,
-    strafeTimer: 0,
-    think: rng.next() * THINK,
-    stuckTimer: 0,
-    stuckCount: 0,
-    stuckX: 0,
-    stuckZ: 0,
-    glance: 0,
-    glanceYaw: 0,
-    smokeDone: false,
+    mode: MODE.HOLD, base: MODE.HOLD, siteIndex: 0, route: null, routeStep: 0, smokeDone: false, bought: false,
+    path: new Float32Array(PATH_POINTS * 2), pathLength: 0, pathIndex: 0,
+    goalX: 0, goalZ: 0, holdX: 0, holdZ: 0, watchX: 0, watchZ: 0,
+    stuckTimer: 0, stuckCount: 0, stuckX: 0, stuckZ: 0,
+    // Combat: who, since when, where last seen, and the hands' current error.
+    target: null, visible: false, lostFor: 9, lastX: 0, lastY: 0, lastZ: 0,
+    reaction: 0, errYaw: 0, errPitch: 0, headAim: false, burst: 0, pause: 0, strafe: 1, strafeTimer: 0,
+    think: rng.next() * THINK, glance: 0, glanceYaw: 0, crouchHold: false,
     skill: rng.range(0.5, 0.85),
-    headAim: false,
-    bought: false,
-    crouchHold: false,
   };
 }
 
@@ -71,10 +41,9 @@ export function createBots(sim) {
   const bots = sim.actors.filter((a) => a.isBot);
   for (const bot of bots) bot.brain = createBrain(sim.rng);
   // What each team knows: where an enemy was last spotted, and near which site.
-  const intel = [
-    { site: -1, age: 99, x: 0, z: 0 },
-    { site: -1, age: 99, x: 0, z: 0 },
-  ];
+  const intel = [{ site: -1, age: 99 }, { site: -1, age: 99 }];
+  const dist = (bot, x, z) => Math.hypot(x - bot.body.x, z - bot.body.z);
+  const yawTo = (bot, x, z) => Math.atan2(-(x - bot.body.x), -(z - bot.body.z));
 
   function setGoal(bot, x, z) {
     const br = bot.brain;
@@ -89,17 +58,29 @@ export function createBots(sim) {
   }
 
   const goCell = (bot, cell) => setGoal(bot, cellX(cell[0]), cellZ(cell[1]));
-  const watchCell = (bot, cell) => {
-    bot.brain.watchX = cellX(cell[0]);
-    bot.brain.watchZ = cellZ(cell[1]);
-  };
+  const watchPoint = (bot, x, z) => Object.assign(bot.brain, { watchX: x, watchZ: z });
+  const resumeRoute = (bot) => goCell(bot, bot.brain.route.path[Math.min(bot.brain.routeStep, bot.brain.route.path.length - 1)]);
 
-  function nearSite(x, z) {
+  function holdAt(bot, hold) {
+    goCell(bot, hold[0]);
+    watchPoint(bot, cellX(hold[1][0]), cellZ(hold[1][1]));
+    bot.brain.holdX = bot.brain.goalX;
+    bot.brain.holdZ = bot.brain.goalZ;
+  }
+
+  // Tell the team where an enemy was just seen or heard.
+  function report(team, x, z) {
+    intel[team].site = -1;
+    intel[team].age = 0;
     for (let s = 0; s < SITES.length; s += 1) {
-      const p = SITES[s].plant;
-      if (Math.hypot(cellX(p[0]) - x, cellZ(p[1]) - z) < 24) return s;
+      if (Math.hypot(cellX(SITES[s].plant[0]) - x, cellZ(SITES[s].plant[1]) - z) < 24) intel[team].site = s;
     }
-    return -1;
+  }
+
+  function remember(br, enemy) {
+    br.lastX = enemy.body.x;
+    br.lastY = enemy.body.y;
+    br.lastZ = enemy.body.z;
   }
 
   // Spend the round's money: rifles when rich, SMGs when getting by, armour first on pistol rounds.
@@ -141,10 +122,7 @@ export function createBots(sim) {
       br.siteIndex = k === 4 ? sim.rng.int(2) : k % 2;
       const holds = SITES[br.siteIndex].holds;
       const hold = holds[k === 4 ? 3 : (Math.floor(k / 2) + sim.rng.int(2)) % 3];
-      goCell(bot, hold[0]);
-      watchCell(bot, hold[1]);
-      br.holdX = br.goalX;
-      br.holdZ = br.goalZ;
+      holdAt(bot, hold);
       br.base = MODE.HOLD;
       br.crouchHold = sim.rng.chance(0.35);
     });
@@ -176,17 +154,17 @@ export function createBots(sim) {
       const o = enemy.body;
       const dx = o.x - ex;
       const dz = o.z - ez;
-      const dist = Math.hypot(dx, dz);
-      if (dist > bestDist) continue;
+      const d = Math.hypot(dx, dz);
+      if (d > bestDist) continue;
       const known = enemy === bot.brain.target && bot.brain.lostFor < 0.4;
-      if (!known && dist > 2.5 && (dx * fx + dz * fz) / dist < FOV_COS) continue;
+      if (!known && d > 2.5 && (dx * fx + dz * fz) / d < FOV_COS) continue;
       const ty = o.y + eyeHeight(o);
       const chest = o.y + eyeHeight(o) * 0.7;
       const seesHead = clearLine(ex, ey, ez, o.x, ty, o.z);
       if (!seesHead && !clearLine(ex, ey, ez, o.x, chest, o.z)) continue;
       if (sim.grenades.blocked(ex, ey, ez, o.x, ty, o.z)) continue;
       best = enemy;
-      bestDist = dist;
+      bestDist = d;
     }
     return best;
   }
@@ -195,19 +173,13 @@ export function createBots(sim) {
     const br = bot.brain;
     for (const enemy of sim.actors) {
       if (!enemy.alive || enemy.team === bot.team || enemy.noiseAge > 0.25) continue;
-      const d = Math.hypot(enemy.body.x - bot.body.x, enemy.body.z - bot.body.z);
-      if (d > enemy.noise) continue;
+      if (dist(bot, enemy.body.x, enemy.body.z) > enemy.noise) continue;
       br.glance = 1.4;
-      br.glanceYaw = Math.atan2(-(enemy.body.x - bot.body.x), -(enemy.body.z - bot.body.z));
-      br.lastX = enemy.body.x;
-      br.lastY = enemy.body.y;
-      br.lastZ = enemy.body.z;
-      const team = intel[bot.team];
-      team.site = nearSite(enemy.body.x, enemy.body.z);
-      team.age = 0;
-      return true;
+      br.glanceYaw = yawTo(bot, enemy.body.x, enemy.body.z);
+      remember(br, enemy);
+      report(bot.team, enemy.body.x, enemy.body.z);
+      return;
     }
-    return false;
   }
 
   function acquire(bot, target) {
@@ -223,14 +195,8 @@ export function createBots(sim) {
     }
     br.target = target;
     br.lostFor = 0;
-    br.lastX = target.body.x;
-    br.lastY = target.body.y;
-    br.lastZ = target.body.z;
-    const team = intel[bot.team];
-    team.site = nearSite(target.body.x, target.body.z);
-    team.age = 0;
-    team.x = target.body.x;
-    team.z = target.body.z;
+    remember(br, target);
+    report(bot.team, target.body.x, target.body.z);
   }
 
   // Turn toward a yaw/pitch at a bounded rate.
@@ -259,12 +225,11 @@ export function createBots(sim) {
   function followPath(bot, dt) {
     const br = bot.brain;
     const b = bot.body;
-    if (br.pathLength === 0) return Math.hypot(br.goalX - b.x, br.goalZ - b.z) < ARRIVE * 2;
-    while (br.pathIndex < br.pathLength - 1 && Math.hypot(br.path[br.pathIndex * 2] - b.x, br.path[br.pathIndex * 2 + 1] - b.z) < ARRIVE) br.pathIndex += 1;
+    if (br.pathLength === 0) return dist(bot, br.goalX, br.goalZ) < ARRIVE * 2;
+    while (br.pathIndex < br.pathLength - 1 && dist(bot, br.path[br.pathIndex * 2], br.path[br.pathIndex * 2 + 1]) < ARRIVE) br.pathIndex += 1;
     const px = br.path[br.pathIndex * 2];
     const pz = br.path[br.pathIndex * 2 + 1];
-    const remaining = Math.hypot(px - b.x, pz - b.z);
-    if (br.pathIndex === br.pathLength - 1 && remaining < ARRIVE) return true;
+    if (br.pathIndex === br.pathLength - 1 && dist(bot, px, pz) < ARRIVE) return true;
     moveToward(bot, px, pz);
     br.stuckTimer += dt;
     if (br.stuckTimer > STUCK_TIME) {
@@ -293,7 +258,7 @@ export function createBots(sim) {
     if (br.pathLength === 0) return;
     const px = br.path[br.pathIndex * 2];
     const pz = br.path[br.pathIndex * 2 + 1];
-    if (Math.hypot(px - b.x, pz - b.z) > 0.3) turn(bot, Math.atan2(-(px - b.x), -(pz - b.z)), 0, 5, dt);
+    if (dist(bot, px, pz) > 0.3) turn(bot, yawTo(bot, px, pz), 0, 5, dt);
   }
 
   function lookAtPoint(bot, x, y, z, rate, dt) {
@@ -310,7 +275,7 @@ export function createBots(sim) {
     const t = br.target;
     const b = bot.body;
     const o = t.body;
-    const dist = Math.hypot(o.x - b.x, o.z - b.z);
+    const range = dist(bot, o.x, o.z);
     const aimY = br.headAim ? o.y + eyeHeight(o) + 0.02 : o.y + eyeHeight(o) * 0.72;
     const decay = Math.exp(-dt * (1.6 + br.skill * 2.6));
     br.errYaw *= decay;
@@ -330,8 +295,8 @@ export function createBots(sim) {
       if (!equip(bot, SLOT_PRIMARY) && !equip(bot, SLOT_SECONDARY) && gun?.def.kind !== 'melee') equip(bot, 3);
     }
     const def = gun?.def;
-    if (def?.scope && !bot.scoped && dist > 6 && bot.switching === 0 && bot.reloading === 0) cmd.scope = true;
-    const tolerance = Math.max(0.012, Math.atan2(0.32, dist)) * (def?.scope ? 0.8 : 1.25);
+    if (def?.scope && !bot.scoped && range > 6 && bot.switching === 0 && bot.reloading === 0) cmd.scope = true;
+    const tolerance = Math.max(0.012, Math.atan2(0.32, range)) * (def?.scope ? 0.8 : 1.25);
     const ready = br.reaction <= 0 && off < tolerance;
     br.pause -= dt;
     if (ready && br.pause <= 0) {
@@ -339,10 +304,10 @@ export function createBots(sim) {
       cmd.firePressed = bot.cooldown === 0;
       if (def?.auto && bot.cooldown === 0 && bot.sinceShot > 0.05) {
         br.burst += 1;
-        const burstMax = dist > 24 ? 3 : dist > 12 ? 5 : 9;
+        const burstMax = range > 24 ? 3 : range > 12 ? 5 : 9;
         if (br.burst >= burstMax) {
           br.burst = 0;
-          br.pause = sim.rng.range(0.18, 0.42) * (dist > 24 ? 1.4 : 1);
+          br.pause = sim.rng.range(0.18, 0.42) * (range > 24 ? 1.4 : 1);
         }
       }
     }
@@ -353,10 +318,10 @@ export function createBots(sim) {
       br.strafe = -br.strafe;
       br.strafeTimer = sim.rng.range(0.35, 0.9);
     }
-    const shooting = cmd.fire && (dist > 10 || def?.scope);
-    if (!shooting && !(holding && dist > 14)) cmd.strafe = br.strafe;
-    if (holding && dist > 18 && (def?.slot === SLOT_PRIMARY)) cmd.crouch = br.crouchHold;
-    if (dist < 6 && def?.kind === 'melee') moveToward(bot, o.x, o.z);
+    const shooting = cmd.fire && (range > 10 || def?.scope);
+    if (!shooting && !(holding && range > 14)) cmd.strafe = br.strafe;
+    if (holding && range > 18 && (def?.slot === SLOT_PRIMARY)) cmd.crouch = br.crouchHold;
+    if (range < 6 && def?.kind === 'melee') moveToward(bot, o.x, o.z);
   }
 
   // Top up an empty-ish magazine when nothing is in sight.
@@ -373,14 +338,15 @@ export function createBots(sim) {
       return false;
     }
     if (equipGrenade(bot, 'smoke')) return true;
-    const x = cellX(cell[0]);
-    const z = cellZ(cell[1]);
-    const d = Math.hypot(x - bot.body.x, z - bot.body.z);
-    const off = lookAtPoint(bot, x, bot.body.y + 1.6 + d * 0.32, z, 6, dt);
-    if (off < 0.05 && bot.switching === 0 && bot.cooldown === 0) {
-      bot.cmd.firePressed = true;
-      br.smokeDone = true;
-    }
+    if (lob(bot, cellX(cell[0]), cellZ(cell[1]), dt)) br.smokeDone = true;
+    return true;
+  }
+
+  // Aim a grenade high at a point and let go once lined up; true when thrown.
+  function lob(bot, x, z, dt) {
+    const off = lookAtPoint(bot, x, bot.body.y + 1.6 + dist(bot, x, z) * 0.3, z, 7, dt);
+    if (off > 0.05 || bot.switching > 0 || bot.cooldown > 0) return false;
+    bot.cmd.firePressed = true;
     return true;
   }
 
@@ -391,16 +357,14 @@ export function createBots(sim) {
     if (bomb.state === 'planted' && br.mode !== MODE.POST) {
       br.mode = MODE.POST;
       br.siteIndex = bomb.site;
-      const post = SITES[bomb.site].post[bot.id % SITES[bomb.site].post.length];
-      goCell(bot, post);
-      br.watchX = bomb.x;
-      br.watchZ = bomb.z;
+      goCell(bot, SITES[bomb.site].post[bot.id % SITES[bomb.site].post.length]);
+      watchPoint(bot, bomb.x, bomb.z);
     } else if (bomb.state === 'dropped' && br.mode !== MODE.FETCH && isNearestTo(bot, bomb.x, bomb.z)) {
       br.mode = MODE.FETCH;
       setGoal(bot, bomb.x, bomb.z);
     } else if (br.mode === MODE.FETCH && bomb.state !== 'dropped') {
       br.mode = MODE.ROUTE;
-      goCell(bot, br.route.path[Math.min(br.routeStep, br.route.path.length - 1)]);
+      resumeRoute(bot);
     }
 
     if (br.mode === MODE.ROUTE) {
@@ -415,8 +379,7 @@ export function createBots(sim) {
         } else {
           br.mode = MODE.POST;
           goCell(bot, site.post[bot.id % site.post.length]);
-          br.watchX = cellX(site.holds[0][0][0]);
-          br.watchZ = cellZ(site.holds[0][0][1]);
+          watchPoint(bot, cellX(site.holds[0][0][0]), cellZ(site.holds[0][0][1]));
         }
       }
       if (bot.hasBomb && sim.round.siteAt(bot.body.x, bot.body.z) === br.siteIndex) {
@@ -429,8 +392,7 @@ export function createBots(sim) {
         br.mode = MODE.POST;
         return;
       }
-      const plant = SITES[br.siteIndex].plant;
-      const near = Math.hypot(cellX(plant[0]) - bot.body.x, cellZ(plant[1]) - bot.body.z) < 2.5;
+      const near = dist(bot, cellX(site.plant[0]), cellZ(site.plant[1])) < 2.5;
       if (followPath(bot, dt) || (near && sim.round.siteAt(bot.body.x, bot.body.z) === br.siteIndex)) {
         bot.cmd.forward = 0;
         bot.cmd.strafe = 0;
@@ -441,18 +403,13 @@ export function createBots(sim) {
     } else if (br.mode === MODE.FETCH) {
       followPath(bot, dt);
       faceTravel(bot, dt);
-    } else if (br.mode === MODE.POST) {
-      holdSpot(bot, dt);
-    } else investigate(bot, dt);
+    } else if (br.mode === MODE.POST) holdSpot(bot, dt);
+    else investigate(bot, dt);
   }
 
   function isNearestTo(bot, x, z) {
-    const mine = Math.hypot(bot.body.x - x, bot.body.z - z);
-    for (const other of bots) {
-      if (other === bot || !other.alive || other.team !== bot.team) continue;
-      if (Math.hypot(other.body.x - x, other.body.z - z) < mine) return false;
-    }
-    return true;
+    const mine = dist(bot, x, z);
+    return !bots.some((o) => o !== bot && o.alive && o.team === bot.team && dist(o, x, z) < mine);
   }
 
   function holdSpot(bot, dt) {
@@ -470,7 +427,7 @@ export function createBots(sim) {
     const br = bot.brain;
     if (followPath(bot, dt)) {
       br.mode = br.base;
-      if (br.base === MODE.ROUTE) goCell(bot, br.route.path[Math.min(br.routeStep, br.route.path.length - 1)]);
+      if (br.base === MODE.ROUTE) resumeRoute(bot);
       else setGoal(bot, br.holdX, br.holdZ);
       return;
     }
@@ -482,7 +439,7 @@ export function createBots(sim) {
     const bomb = sim.round.state.bomb;
     if (bomb.state === 'planted') {
       // Too late to make the defuse: fall back and save the gun.
-      const need = (bot.kit ? KIT_DEFUSE_TIME : DEFUSE_TIME) + Math.hypot(bomb.x - bot.body.x, bomb.z - bot.body.z) / 5;
+      const need = (bot.kit ? KIT_DEFUSE_TIME : DEFUSE_TIME) + dist(bot, bomb.x, bomb.z) / 5;
       if (bomb.timer < need && bot.using === 0) {
         if (br.mode !== MODE.SAVE) {
           br.mode = MODE.SAVE;
@@ -496,8 +453,7 @@ export function createBots(sim) {
         br.mode = MODE.RETAKE;
         setGoal(bot, bomb.x, bomb.z);
       }
-      const d = Math.hypot(bomb.x - bot.body.x, bomb.z - bot.body.z);
-      if (d < 1.3) {
+      if (dist(bot, bomb.x, bomb.z) < 1.3) {
         bot.cmd.use = true;
         bot.cmd.crouch = true;
         lookAtPoint(bot, bomb.x, bomb.y, bomb.z, 4, dt);
@@ -511,15 +467,10 @@ export function createBots(sim) {
     const team = intel[WARDENS];
     if (br.mode === MODE.HOLD && team.site >= 0 && team.site !== br.siteIndex && team.age > 1.5 && team.age < INTEL_TIME && br.skill > 0.55) {
       br.siteIndex = team.site;
-      const hold = SITES[team.site].holds[2];
-      goCell(bot, hold[0]);
-      watchCell(bot, hold[1]);
-      br.holdX = br.goalX;
-      br.holdZ = br.goalZ;
+      holdAt(bot, SITES[team.site].holds[2]);
     }
-    if (br.mode === MODE.HOLD) {
-      holdSpot(bot, dt);
-    } else investigate(bot, dt);
+    if (br.mode === MODE.HOLD) holdSpot(bot, dt);
+    else investigate(bot, dt);
   }
 
   function think(bot, dt) {
@@ -573,14 +524,8 @@ export function createBots(sim) {
     }
     if (br.target) {
       lookAtPoint(bot, br.lastX, br.lastY + 1.4, br.lastZ, 5, dt);
-      if (bot.nades.frag > 0 && br.lostFor > 0.6 && br.lostFor < 0.8 && Math.hypot(br.lastX - bot.body.x, br.lastZ - bot.body.z) > 8) {
-        equipGrenade(bot, 'frag');
-      }
-      if (bot.slot === SLOT_GRENADE && bot.switching === 0) {
-        const d = Math.hypot(br.lastX - bot.body.x, br.lastZ - bot.body.z);
-        lookAtPoint(bot, br.lastX, bot.body.y + 1.6 + d * 0.28, br.lastZ, 8, dt);
-        cmd.firePressed = true;
-      }
+      if (br.lostFor > 0.6 && br.lostFor < 0.8 && dist(bot, br.lastX, br.lastZ) > 8) equipGrenade(bot, 'frag');
+      if (bot.slot === SLOT_GRENADE) lob(bot, br.lastX, br.lastZ, dt);
       return;
     }
     tidy(bot);

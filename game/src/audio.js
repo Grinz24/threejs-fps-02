@@ -109,95 +109,41 @@ export function createAudio() {
     // listener: the watched body ({ x, z, yaw }); viewer: the actor whose own sounds are close.
     onEvent(e, listener, viewer) {
       if (!ctx) return;
-      const own = e.actor === viewer && viewer !== null;
-      switch (e.type) {
-        case EV.SHOT:
-          gunshot(e.weapon, e.x, e.z, listener);
-          break;
-        case EV.STEP: {
-          if (own) break;
-          const p = locate(e.x, e.z, listener);
-          burst(0.35 * p.gain, p.pan, 0.06, 'bandpass', 420, 1.4);
-          break;
-        }
-        case EV.RELOAD:
-        case EV.EQUIP: {
-          const p = locate(e.actor.body.x, e.actor.body.z, listener);
-          tone(0.18 * p.gain, p.pan, 0.03, 'square', 1400, 900);
-          tone(0.16 * p.gain, p.pan, 0.04, 'square', 900, 700, ctx.currentTime + (e.type === EV.RELOAD ? 0.5 : 0.12));
-          break;
-        }
-        case EV.DRY:
-          if (own) tone(0.2, 0, 0.02, 'square', 2200, 2000);
-          break;
-        case EV.SWING: {
-          const p = locate(e.actor.body.x, e.actor.body.z, listener);
-          burst(0.3 * p.gain, p.pan, 0.12, 'bandpass', 2400, 2, ctx.currentTime, 800);
-          break;
-        }
-        case EV.HIT:
-          if (e.actor === viewer && viewer) {
-            if (e.b === 1) {
-              tone(0.35, 0, 0.18, 'sine', 3200, 3000);
-              tone(0.22, 0, 0.12, 'sine', 4700, 4500);
-            } else tone(0.25, 0, 0.05, 'triangle', 1500, 1300);
-          } else if (e.target === viewer) {
-            burst(0.5, 0, 0.12, 'lowpass', 700, 1);
-          }
-          break;
-        case EV.KILL:
-          if (e.actor === viewer && viewer) tone(0.35, 0, 0.25, 'sine', 600, 300);
-          break;
-        case EV.THROW: {
-          const p = locate(e.x, e.z, listener);
-          burst(0.3 * p.gain, p.pan, 0.25, 'bandpass', 600, 2, ctx.currentTime, 2400);
-          break;
-        }
-        case EV.BOUNCE: {
-          const p = locate(e.x, e.z, listener);
-          tone(0.2 * p.gain, p.pan, 0.05, 'square', 700, 500);
-          break;
-        }
-        case EV.BLAST: {
-          const p = locate(e.x, e.z, listener);
-          if (e.weapon === 'smoke') burst(0.6 * p.gain, p.pan, 1.6, 'lowpass', 1200, 0.4, ctx.currentTime, 300);
-          else {
-            burst(1.4 * p.gain, p.pan, e.weapon === 'flash' ? 0.4 : 1.1, 'lowpass', 2400, 0.5, ctx.currentTime, 120);
-            tone(1.0 * p.gain, p.pan, 0.7, 'sine', 90, 30);
-          }
-          break;
-        }
-        case EV.EXPLODED: {
-          const p = locate(e.x, e.z, listener);
-          burst(2.2 * Math.max(0.4, p.gain), p.pan, 2.6, 'lowpass', 3000, 0.4, ctx.currentTime, 60);
-          tone(1.6, p.pan, 1.6, 'sine', 70, 22);
-          break;
-        }
-        case EV.BEEP: {
-          const p = locate(e.x, e.z, listener);
-          tone(0.28 * Math.max(0.25, p.gain), p.pan, 0.07, 'square', 1850, 1850);
-          break;
-        }
-        case EV.PLANTED:
-          chord([880, 660], 0.18, 0.25, 'square');
-          break;
-        case EV.DEFUSED:
-          chord([660, 880, 1320], 0.1, 0.25, 'square');
-          break;
-        case EV.ROUND_LIVE:
-          chord([392, 523], 0.12, 0.22);
-          break;
-        case EV.ROUND_END:
-          chord(viewer && e.a === viewer.team ? [523, 659, 784] : [392, 311, 262], 0.16, 0.3);
-          break;
-        case EV.BUY:
-          tone(0.18, 0, 0.06, 'triangle', 900, 1300);
-          break;
-        case EV.PICKUP:
-          if (own) tone(0.2, 0, 0.08, 'triangle', 700, 1000);
-          break;
-        default:
-      }
+      const mine = viewer !== null && e.actor === viewer;
+      const now = ctx.currentTime;
+      const { gain, pan } = locate(e.x, e.z, listener);
+      const t = e.type;
+      if (t === EV.SHOT) gunshot(e.weapon, e.x, e.z, listener);
+      else if (t === EV.STEP && !mine) burst(0.35 * gain, pan, 0.06, 'bandpass', 420, 1.4);
+      else if (t === EV.RELOAD || t === EV.EQUIP) {
+        tone(0.18 * gain, pan, 0.03, 'square', 1400, 900);
+        tone(0.16 * gain, pan, 0.04, 'square', 900, 700, now + (t === EV.RELOAD ? 0.5 : 0.12));
+      } else if (t === EV.DRY && mine) tone(0.2, 0, 0.02, 'square', 2200, 2000);
+      else if (t === EV.SWING) burst(0.3 * gain, pan, 0.12, 'bandpass', 2400, 2, now, 800);
+      else if (t === EV.HIT && mine) {
+        // A head shot rings; a body shot thuds.
+        if (e.b === 1) {
+          tone(0.35, 0, 0.18, 'sine', 3200, 3000);
+          tone(0.22, 0, 0.12, 'sine', 4700, 4500);
+        } else tone(0.25, 0, 0.05, 'triangle', 1500, 1300);
+      } else if (t === EV.HIT && viewer && e.target === viewer) burst(0.5, 0, 0.12, 'lowpass', 700, 1);
+      else if (t === EV.KILL && mine) tone(0.35, 0, 0.25, 'sine', 600, 300);
+      else if (t === EV.THROW) burst(0.3 * gain, pan, 0.25, 'bandpass', 600, 2, now, 2400);
+      else if (t === EV.BOUNCE) tone(0.2 * gain, pan, 0.05, 'square', 700, 500);
+      else if (t === EV.BLAST && e.weapon === 'smoke') burst(0.6 * gain, pan, 1.6, 'lowpass', 1200, 0.4, now, 300);
+      else if (t === EV.BLAST) {
+        burst(1.4 * gain, pan, e.weapon === 'flash' ? 0.4 : 1.1, 'lowpass', 2400, 0.5, now, 120);
+        tone(gain, pan, 0.7, 'sine', 90, 30);
+      } else if (t === EV.EXPLODED) {
+        burst(2.2 * Math.max(0.4, gain), pan, 2.6, 'lowpass', 3000, 0.4, now, 60);
+        tone(1.6, pan, 1.6, 'sine', 70, 22);
+      } else if (t === EV.BEEP) tone(0.28 * Math.max(0.25, gain), pan, 0.07, 'square', 1850, 1850);
+      else if (t === EV.PLANTED) chord([880, 660], 0.18, 0.25, 'square');
+      else if (t === EV.DEFUSED) chord([660, 880, 1320], 0.1, 0.25, 'square');
+      else if (t === EV.ROUND_LIVE) chord([392, 523], 0.12, 0.22);
+      else if (t === EV.ROUND_END) chord(viewer && e.a === viewer.team ? [523, 659, 784] : [392, 311, 262], 0.16, 0.3);
+      else if (t === EV.BUY && mine) tone(0.18, 0, 0.06, 'triangle', 900, 1300);
+      else if (t === EV.PICKUP && mine) tone(0.2, 0, 0.08, 'triangle', 700, 1000);
     },
   };
 }

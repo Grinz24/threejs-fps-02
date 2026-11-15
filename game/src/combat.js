@@ -184,7 +184,7 @@ function swing(sim, actor) {
   actor.sinceShot = 0;
   aimDirection(actor, ray);
   const wall = raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, def.reach, worldHit);
-  sim.events.emit(EV.SWING, actor);
+  sim.events.emit(EV.SWING, actor, actor.body.x, actor.body.y, actor.body.z);
   // A blade is forgiving: test a little below the eye line as well.
   let victim = traceBodies(sim, actor, ray, wall);
   if (!victim) {
@@ -201,7 +201,7 @@ function startReload(sim, actor, gun) {
   if (gun.def.kind !== 'gun' || gun.mag >= gun.def.mag || gun.reserve <= 0 || actor.reloading > 0) return;
   actor.reloading = gun.def.reload;
   actor.scoped = false;
-  sim.events.emit(EV.RELOAD, actor);
+  sim.events.emit(EV.RELOAD, actor, actor.body.x, actor.body.y, actor.body.z);
 }
 
 // One step of weapon handling for one actor, driven by its command.
@@ -216,7 +216,7 @@ export function stepArms(sim, actor, dt, canFire) {
   actor.punchYaw *= decay;
   if (actor.sinceShot > 0.4) actor.shots = 0;
 
-  if (cmd.select && equip(actor, cmd.select)) sim.events.emit(EV.EQUIP, actor);
+  if (cmd.select && equip(actor, cmd.select)) sim.events.emit(EV.EQUIP, actor, actor.body.x, actor.body.y, actor.body.z);
   const gun = heldGun(actor);
   if (gun && gun.def.kind === 'gun') actor.bloom = Math.max(0, actor.bloom - gun.def.recover * dt);
 
@@ -248,7 +248,7 @@ export function stepArms(sim, actor, dt, canFire) {
   if (gun.mag > 0) fireGun(sim, actor, gun);
   else if (gun.reserve > 0) startReload(sim, actor, gun);
   else if (cmd.firePressed) {
-    sim.events.emit(EV.DRY, actor);
+    sim.events.emit(EV.DRY, actor, actor.body.x, actor.body.y, actor.body.z);
     actor.cooldown = 0.25;
     if (actor.slot !== SLOT_KNIFE && actor.isBot) equip(actor, SLOT_KNIFE);
   }
