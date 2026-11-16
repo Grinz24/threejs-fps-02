@@ -10,7 +10,7 @@ import { eyeHeight, RADIUS } from './movement.js';
 import { PHASE, DEFUSE_TIME, KIT_DEFUSE_TIME } from './round.js';
 import { heldGun, buy, canBuy, equip, equipGrenade, clearCmd } from './actors.js';
 import { SLOT_PRIMARY, SLOT_SECONDARY, SLOT_GRENADE, SLOT_BOMB } from './weapons.js';
-import { EV } from './events.js';
+import { EV, ALERT } from './events.js';
 
 const THINK = 0.1;
 const SIGHT_RANGE = 75;
@@ -22,6 +22,10 @@ const LOST_TIME = 2.6;
 const INTEL_TIME = 6;
 // A team calls out an enemy only once it has gone this long without anyone on it seeing them.
 const CONTACT_GAP = 4;
+// Enemies this close to a called one, and in the caller's sight, are called with it.
+const GROUP_RADIUS = 8;
+// How soon a team repeats a call about the charge, by ALERT kind: a planted charge is called once.
+const ALERT_GAP = [5, 5, 1e9];
 const MODE = { ROUTE: 0, HOLD: 1, PLANT: 2, POST: 3, FETCH: 4, RETAKE: 5, INVESTIGATE: 6, SAVE: 7 };
 
 const wrap = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -34,7 +38,7 @@ function createBrain(rng) {
     stuckTimer: 0, stuckCount: 0, stuckX: 0, stuckZ: 0,
     // Combat: who, since when, where last seen, and the hands' current error.
     target: null, visible: false, lostFor: 9, lastX: 0, lastY: 0, lastZ: 0,
-    reaction: 0, errYaw: 0, errPitch: 0, headAim: false, burst: 0, pause: 0, strafe: 1, strafeTimer: 0,
+    reaction: 0, errYaw: 0, errPitch: 0, headAim: false, burst: 0, pause: 0, strafe: 1, strafeTimer: 0, retreat: false,
     think: rng.next() * THINK, glance: 0, glanceYaw: 0, crouchHold: false,
     skill: rng.range(0.5, 0.85),
   };
@@ -47,6 +51,8 @@ export function createBots(sim) {
   const intel = [{ site: -1, age: 99 }, { site: -1, age: 99 }];
   // When each team last had eyes on each actor, by id: the rising edge of a sighting is a radio call.
   const sighted = [new Float64Array(sim.actors.length), new Float64Array(sim.actors.length)];
+  // When each team last called each ALERT kind.
+  const alerted = [new Float64Array(3), new Float64Array(3)];
   const dist = (bot, x, z) => Math.hypot(x - bot.body.x, z - bot.body.z);
   const yawTo = (bot, x, z) => Math.atan2(-(x - bot.body.x), -(z - bot.body.z));
 
@@ -82,10 +88,48 @@ export function createBots(sim) {
     }
   }
 
+  // A fresh sighting goes out with how far off it is and how many are with it; the others in
+  // the group count as called, so they do not each get a call of their own a moment later.
   function callContact(bot, enemy) {
     const last = sighted[bot.team];
-    if (sim.time - last[enemy.id] > CONTACT_GAP) sim.events.emit(EV.CONTACT, bot, enemy.body.x, enemy.body.y, enemy.body.z).target = enemy;
+    if (sim.time - last[enemy.id] > CONTACT_GAP) {
+      const b = bot.body;
+      const ey = b.y + eyeHeight(b);
+      let group = 0;
+      for (const o of sim.actors) {
+        if (!o.alive || o.team === bot.team) continue;
+        if (o !== enemy) {
+          if (Math.hypot(o.body.x - enemy.body.x, o.body.z - enemy.body.z) > GROUP_RADIUS) continue;
+          if (!clearLine(b.x, ey, b.z, o.body.x, o.body.y + eyeHeight(o.body), o.body.z)) continue;
+          last[o.id] = sim.time;
+        }
+        group += 1;
+      }
+      const e = sim.events.emit(EV.CONTACT, bot, enemy.body.x, enemy.body.y, enemy.body.z, group, dist(bot, enemy.body.x, enemy.body.z));
+      e.target = enemy;
+    }
     last[enemy.id] = sim.time;
+  }
+
+  function callAlert(bot, kind, x, y, z, target) {
+    const last = alerted[bot.team];
+    if (sim.time - last[kind] <= ALERT_GAP[kind]) return;
+    last[kind] = sim.time;
+    sim.events.emit(EV.ALERT, bot, x, y, z, kind).target = target;
+  }
+
+  // A Warden that gets eyes on a planted charge calls exactly where it is.
+  function spotCharge(bot) {
+    const bomb = sim.round.state.bomb;
+    if (bomb.state !== 'planted' || sim.time - alerted[bot.team][ALERT.CHARGE] <= ALERT_GAP[ALERT.CHARGE]) return;
+    const b = bot.body;
+    const dx = bomb.x - b.x;
+    const dz = bomb.z - b.z;
+    const d = Math.hypot(dx, dz);
+    if (d > SIGHT_RANGE || (d > 2.5 && (dx * -Math.sin(b.yaw) + dz * -Math.cos(b.yaw)) / d < FOV_COS)) return;
+    const ey = b.y + eyeHeight(b);
+    if (!clearLine(b.x, ey, b.z, bomb.x, bomb.y + 0.2, bomb.z) || sim.grenades.blocked(b.x, ey, b.z, bomb.x, bomb.y + 0.2, bomb.z)) return;
+    callAlert(bot, ALERT.CHARGE, bomb.x, bomb.y, bomb.z, null);
   }
 
   function remember(br, enemy) {
@@ -117,6 +161,7 @@ export function createBots(sim) {
   function planRound() {
     for (const team of intel) team.site = -1;
     for (const team of sighted) team.fill(-CONTACT_GAP - 1);
+    for (const team of alerted) team.fill(-1e10);
     const raiders = bots.filter((b) => b.team === RAIDERS);
     const wardens = bots.filter((b) => b.team === WARDENS);
     const site = sim.rng.int(SITES.length);
@@ -336,6 +381,15 @@ export function createBots(sim) {
     if (!shooting && !(holding && range > 14)) cmd.strafe = br.strafe;
     if (holding && range > 18 && (def?.slot === SLOT_PRIMARY)) cmd.crouch = br.crouchHold;
     if (range < 6 && def?.kind === 'melee') moveToward(bot, o.x, o.z);
+    // A holder caught reloading falls back off its angle, still facing the threat and jinking,
+    // instead of standing in the open with an empty gun. (Pushers and retakers keep going:
+    // giving ground there loses the round.)
+    br.retreat = holding && range > 3 && def?.kind === 'gun' && bot.reloading > 0;
+    if (br.retreat) {
+      cmd.forward = -1;
+      cmd.strafe = br.strafe;
+      cmd.crouch = false;
+    }
   }
 
   // Top up an empty-ish magazine when nothing is in sight.
@@ -514,8 +568,11 @@ export function createBots(sim) {
       if (seen) {
         acquire(bot, seen);
         callContact(bot, seen);
+        // Caught in the act: someone on the charge is worth more than a plain contact.
+        if (seen.using > 0) callAlert(bot, seen.team === RAIDERS ? ALERT.PLANTING : ALERT.DEFUSING, seen.body.x, seen.body.y, seen.body.z, seen);
       }
       else if (!br.target || br.lostFor > 0.4) hear(bot);
+      if (bot.team === WARDENS) spotCharge(bot);
     }
     if (br.target && !br.target.alive) {
       br.target = null;
@@ -524,7 +581,7 @@ export function createBots(sim) {
     if (br.target && br.visible) {
       engage(bot, dt);
       // Keep pushing while trading shots in the open, but stand still to fire.
-      if ((br.mode === MODE.ROUTE || br.mode === MODE.INVESTIGATE || br.mode === MODE.RETAKE) && !cmd.fire) followPath(bot, dt);
+      if ((br.mode === MODE.ROUTE || br.mode === MODE.INVESTIGATE || br.mode === MODE.RETAKE) && !cmd.fire && !br.retreat) followPath(bot, dt);
       return;
     }
     if (br.target) {
@@ -532,7 +589,8 @@ export function createBots(sim) {
       br.lostFor += dt;
       if (br.lostFor > LOST_TIME) {
         const holder = br.mode === MODE.HOLD || br.mode === MODE.POST || br.mode === MODE.RETAKE || br.mode === MODE.PLANT;
-        if (!holder && br.mode !== MODE.FETCH) {
+        // Nobody badly hurt goes looking for the fight they just backed out of.
+        if (!holder && br.mode !== MODE.FETCH && bot.hp >= 35) {
           br.mode = MODE.INVESTIGATE;
           setGoal(bot, br.lastX, br.lastZ);
         }

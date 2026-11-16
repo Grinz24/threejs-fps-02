@@ -24,8 +24,12 @@ export const EV = {
   PICKUP: 20, // actor
   DRY: 21,
   MATCH_END: 22, // a = winning team
-  CONTACT: 23, // actor = bot calling it, target = enemy seen, x y z where
+  CONTACT: 23, // actor = bot calling it, target = enemy seen, x y z where, a = enemies seen together, b = range from the caller
+  ALERT: 24, // actor = bot calling it, target = enemy (or null), x y z where, a = ALERT kind
 };
+
+// What a bot saw happen to the charge, for the team radio.
+export const ALERT = { PLANTING: 0, DEFUSING: 1, CHARGE: 2 };
 
 const CAPACITY = 512;
 

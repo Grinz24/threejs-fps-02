@@ -29,6 +29,9 @@ const LOSS_MAX = 3400;
 const PLANT_PAY = 300;
 const PLANT_TEAM_PAY = 800;
 
+// What a team is paid for its next loss, after `streak` losses in a row.
+export const lossBonus = (streak) => Math.min(LOSS_MAX, LOSS_PAY + LOSS_STEP * streak);
+
 export function createRound(sim) {
   const state = {
     phase: PHASE.FREEZE,
@@ -80,7 +83,7 @@ export function createRound(sim) {
     state.score[winner] += 1;
     const loser = 1 - winner;
     state.lossStreak[winner] = 0;
-    const lossPay = Math.min(LOSS_MAX, LOSS_PAY + LOSS_STEP * state.lossStreak[loser]);
+    const lossPay = lossBonus(state.lossStreak[loser]);
     state.lossStreak[loser] += 1;
     for (const actor of sim.actors) {
       if (actor.team === winner) earn(actor, WIN_PAY[reason]);

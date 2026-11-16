@@ -24,6 +24,73 @@ const hit = { nx: 0, ny: 0, nz: 0 };
 const aim = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
 const volume = { x: 0, z: 0, y0: 0, y1: 0, radius: 0, headX: 0, headY: 0, headZ: 0, headRadius: 0, height: 0 };
 
+// Where a throw leaves the hand and how fast: the same for a real grenade and a preview.
+function launch(actor, g) {
+  aimDirection(actor, aim, 0, 0.08);
+  const b = actor.body;
+  g.x = aim.ox + aim.dx * 0.4;
+  g.y = aim.oy - 0.1;
+  g.z = aim.oz + aim.dz * 0.4;
+  g.vx = aim.dx * THROW_SPEED + b.vx * 0.6;
+  g.vy = aim.dy * THROW_SPEED + 1.6 + b.vy * 0.4;
+  g.vz = aim.dz * THROW_SPEED + b.vz * 0.6;
+}
+
+// One step of flight against the map; on contact returns the speed it struck at, else 0.
+function fly(g, dt, h) {
+  g.vy -= GRAVITY * dt;
+  const speed = Math.hypot(g.vx, g.vy, g.vz);
+  if (speed < 1e-4) return 0;
+  const dist = speed * dt;
+  const dx = g.vx / speed;
+  const dy = g.vy / speed;
+  const dz = g.vz / speed;
+  const t = raycast(g.x, g.y, g.z, dx, dy, dz, dist + RADIUS, h);
+  if (t >= dist + RADIUS) {
+    g.x += g.vx * dt;
+    g.y += g.vy * dt;
+    g.z += g.vz * dt;
+    return 0;
+  }
+  const travel = Math.max(0, t - RADIUS);
+  g.x += dx * travel;
+  g.y += dy * travel;
+  g.z += dz * travel;
+  const into = g.vx * h.nx + g.vy * h.ny + g.vz * h.nz;
+  g.vx = (g.vx - 2 * into * h.nx) * RESTITUTION;
+  g.vy = (g.vy - 2 * into * h.ny) * RESTITUTION;
+  g.vz = (g.vz - 2 * into * h.nz) * RESTITUTION;
+  if (h.ny > 0.5 && Math.abs(g.vy) < 1.2) {
+    g.vy = 0;
+    g.vx *= 0.8;
+    g.vz *= 0.8;
+  }
+  return speed;
+}
+
+// The path a grenade would take if the actor threw it now, for the thrower's line-up aid:
+// `out` gets x y z triples every `every` steps until the fuse, and the count is returned.
+// Reads the actor, never writes it, and keeps its own scratch state.
+const ghost = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
+const ghostHit = { nx: 0, ny: 0, nz: 0 };
+export function predictThrow(actor, out, dt, every) {
+  launch(actor, ghost);
+  const kind = GRENADES[actor.nade];
+  const steps = Math.ceil((kind.fuse + (actor.nade === 'smoke' ? 0.6 : 0)) / dt);
+  const max = Math.floor(out.length / 3);
+  let n = 0;
+  for (let i = 0; i <= steps && n < max; i += 1) {
+    if (i % every === 0 || i === steps) {
+      out[n * 3] = ghost.x;
+      out[n * 3 + 1] = ghost.y;
+      out[n * 3 + 2] = ghost.z;
+      n += 1;
+    }
+    fly(ghost, dt, ghostHit);
+  }
+  return n;
+}
+
 export function createGrenades(sim) {
   const list = [];
   for (let i = 0; i < POOL; i += 1) list.push({ active: false, kind: 'frag', owner: null, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, fuse: 0, spin: 0 });
@@ -37,13 +104,8 @@ export function createGrenades(sim) {
     if (!g) return;
     actor.nades[kind] -= 1;
     actor.cooldown = 0.6;
-    aimDirection(actor, aim, 0, 0.08);
-    const b = actor.body;
-    Object.assign(g, {
-      active: true, kind, owner: actor, fuse: GRENADES[kind].fuse, spin: 0,
-      x: aim.ox + aim.dx * 0.4, y: aim.oy - 0.1, z: aim.oz + aim.dz * 0.4,
-      vx: aim.dx * THROW_SPEED + b.vx * 0.6, vy: aim.dy * THROW_SPEED + 1.6 + b.vy * 0.4, vz: aim.dz * THROW_SPEED + b.vz * 0.6,
-    });
+    Object.assign(g, { active: true, kind, owner: actor, fuse: GRENADES[kind].fuse, spin: 0 });
+    launch(actor, g);
     const e = sim.events.emit(EV.THROW, actor, g.x, g.y, g.z);
     e.weapon = kind;
     equipBest(actor);
@@ -95,34 +157,7 @@ export function createGrenades(sim) {
   }
 
   function move(g, dt) {
-    g.vy -= GRAVITY * dt;
-    const speed = Math.hypot(g.vx, g.vy, g.vz);
-    if (speed < 1e-4) return;
-    const dist = speed * dt;
-    const dx = g.vx / speed;
-    const dy = g.vy / speed;
-    const dz = g.vz / speed;
-    const t = raycast(g.x, g.y, g.z, dx, dy, dz, dist + RADIUS, hit);
-    if (t >= dist + RADIUS) {
-      g.x += g.vx * dt;
-      g.y += g.vy * dt;
-      g.z += g.vz * dt;
-      return;
-    }
-    const travel = Math.max(0, t - RADIUS);
-    g.x += dx * travel;
-    g.y += dy * travel;
-    g.z += dz * travel;
-    const into = g.vx * hit.nx + g.vy * hit.ny + g.vz * hit.nz;
-    g.vx = (g.vx - 2 * into * hit.nx) * RESTITUTION;
-    g.vy = (g.vy - 2 * into * hit.ny) * RESTITUTION;
-    g.vz = (g.vz - 2 * into * hit.nz) * RESTITUTION;
-    if (hit.ny > 0.5 && Math.abs(g.vy) < 1.2) {
-      g.vy = 0;
-      g.vx *= 0.8;
-      g.vz *= 0.8;
-    }
-    if (speed > 2.5) sim.events.emit(EV.BOUNCE, g.owner, g.x, g.y, g.z);
+    if (fly(g, dt, hit) > 2.5) sim.events.emit(EV.BOUNCE, g.owner, g.x, g.y, g.z);
   }
 
   // Does any live smoke cloud cut the segment between two points?

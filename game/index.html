@@ -103,6 +103,9 @@
   #board tr.dead td { opacity: 0.45; }
   #board tr.me td { color: var(--accent); }
   #board .num { text-align: right; }
+  #board table { table-layout: fixed; }
+  #board th:first-child { width: 40%; }
+  #board tfoot td { padding-top: 7px; border-top: 1px solid var(--hairline); font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
   #buy, .overlay { position: fixed; inset: 0; display: grid; place-items: center; overflow-y: auto; pointer-events: auto; }
   #buy { background: rgba(12, 13, 16, 0.55); }

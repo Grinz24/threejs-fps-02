@@ -4,20 +4,33 @@
 // touches an element only when the value it shows has changed.
 import { TEAMS, SITES, CALLOUTS, RAIDERS, WARDENS } from './level.js';
 import { calloutAt, cellIndex } from './world.js';
-import { EV } from './events.js';
-import { PHASE, ROUNDS_TO_WIN, BOMB_TIME } from './round.js';
+import { EV, ALERT } from './events.js';
+import { PHASE, ROUNDS_TO_WIN, BOMB_TIME, lossBonus } from './round.js';
 import { heldGun, heldId, grenadeCount } from './actors.js';
 import { inaccuracy } from './combat.js';
-import { nameOf, SLOT_GRENADE, SLOT_BOMB } from './weapons.js';
+import { nameOf, priceOf, SLOT_GRENADE, SLOT_BOMB } from './weapons.js';
 import { TEAM_SIZE } from './sim.js';
 
 const $ = (id) => document.getElementById(id);
 const FEED_TIME = 7;
 const RADIO_TIME = 3;
+const ALERT_TIME = 4.5;
+// What a teammate shouts about the charge, by ALERT kind.
+const ALERT_LINES = ['Planting at {place}!', 'Defusing at {place}! Stop them!', 'Charge spotted at {place}'];
 const REASONS = ['All {loser} eliminated', 'The charge detonated', 'The charge was defused', 'Time ran out'];
 const teamClass = (team) => (team === RAIDERS ? 'raider' : 'warden');
 const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const hundredths = (v) => String(v / 100);
+// What a living actor carries at shop prices; the starting pistol is free.
+function loadout(a) {
+  if (!a.alive) return 0;
+  let value = a.primary ? a.primary.def.price : 0;
+  if (a.secondary && a.secondary.def.id !== 'kestrel') value += a.secondary.def.price;
+  if (a.armor > 0) value += priceOf(a.helmet ? 'helmet' : 'vest');
+  if (a.kit) value += priceOf('kit');
+  for (const kind in a.nades) value += a.nades[kind] * priceOf(kind);
+  return value;
+}
 const carries = (a, slot) => (slot === 0 ? a.primary !== null : slot === 1 ? a.secondary !== null
   : slot === 3 ? grenadeCount(a) > 0 : slot === 4 ? a.hasBomb : true);
 
@@ -43,11 +56,13 @@ export function createHud(sim) {
   const board = $('board');
   const moneyGain = $('money-gain');
   const ticks = $('crosshair').children;
-  // The team radio sits under the radar's location line.
-  const radio = $('radar-box').appendChild(document.createElement('div'));
+  // The team radio sits under the radar's location line; a rematch reuses the line.
+  const radio = $('radio') ?? $('radar-box').appendChild(document.createElement('div'));
   radio.id = 'radio';
+  radio.hidden = true;
   Object.assign(radio.style, { padding: '4px 2px 0', fontSize: '13px', fontWeight: '600', color: 'var(--accent)' });
   const radioShown = shown(radio);
+  const radioUrgent = cached((on) => { radio.style.color = on ? 'var(--danger)' : 'var(--accent)'; });
   const ui = {
     score: [text($('score-0')), text($('score-1'))],
     timer: text($('timer'), clock),
@@ -100,6 +115,7 @@ export function createHud(sim) {
   let radioTime = 0;
   let radioPlace = '';
   let radioCount = 0;
+  let radioAlert = 0;
 
   function showBanner(title, copy, seconds, tone = '') {
     $('banner-title').textContent = title;
@@ -120,24 +136,54 @@ export function createHud(sim) {
     if (feedItems.length > 6) feedItems.shift().row.remove();
   }
 
-  // A teammate bot just saw an enemy nobody on the team had eyes on: name the spot. Calls that
-  // land on the same spot while one is still up stack into a count instead of replacing it.
-  function contact(e) {
-    const place = CALLOUTS[calloutAt(cellIndex(e.x, e.z))]?.[0] ?? '';
-    radioCount = radioTime > 0 && place === radioPlace ? radioCount + 1 : 1;
-    radioPlace = place;
-    radioTime = RADIO_TIME;
-    const where = place ? `Contact at ${place}` : 'Contact';
-    radio.textContent = `${e.actor.name} · ${where}${radioCount > 1 ? ` ×${radioCount}` : ''}`;
+  // How far a called spot is from the one listening, or from the caller when nobody is.
+  function range(e, viewer) {
+    const from = viewer && viewer.alive ? viewer.body : e.actor.body;
+    return `${Math.round(Math.hypot(e.x - from.x, e.z - from.z))}m`;
   }
 
+  // A teammate bot just saw an enemy nobody on the team had eyes on: name the spot, how many
+  // were seen together and how far off it is. Calls that land on the same spot while one is
+  // still up stack into a count instead of replacing it.
+  function contact(e, viewer) {
+    if (radioAlert > 0) return;
+    const place = CALLOUTS[calloutAt(cellIndex(e.x, e.z))]?.[0] ?? '';
+    radioCount = radioTime > 0 && place === radioPlace ? radioCount + e.a : e.a;
+    radioPlace = place;
+    radioTime = RADIO_TIME;
+    const who = radioCount > 1 ? `${radioCount} enemies` : 'Contact';
+    radio.textContent = `${e.actor.name} · ${who}${place ? ` at ${place}` : ''} · ${range(e, viewer)}`;
+    radioUrgent(false);
+  }
+
+  // A teammate saw the charge going down, coming off, or lying planted: louder, and it holds
+  // the radio line against plain contacts for a moment.
+  function chargeCall(e, viewer) {
+    const place = CALLOUTS[calloutAt(cellIndex(e.x, e.z))]?.[0] ?? 'the site';
+    radioPlace = '';
+    radioTime = ALERT_TIME;
+    radioAlert = 1.5;
+    const line = ALERT_LINES[e.a].replace('{place}', place);
+    radio.textContent = `${e.actor.name} · ${line}${e.a === ALERT.CHARGE ? ` · ${range(e, viewer)}` : ''}`;
+    radioUrgent(e.a !== ALERT.CHARGE);
+  }
+
+  // Money and gear show for one's own team only, with the team's totals and what its next
+  // loss would pay underneath.
   function renderBoard(viewer) {
-    const rows = (team) => sim.actors
-      .filter((a) => a.team === team)
+    const ours = (team) => viewer !== null && team === viewer.team;
+    const members = (team) => sim.actors.filter((a) => a.team === team);
+    const rows = (team) => members(team)
       .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)
-      .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a === sim.player ? 'me' : ''}"><td>${a.name}${a.hasBomb ? ' ◆' : a.kit ? ' ✚' : ''}</td><td class="num">${a.kills}</td><td class="num">${a.deaths}</td><td class="num">${viewer && a.team === viewer.team ? `$${a.money}` : ''}</td></tr>`)
+      .map((a) => `<tr class="${a.alive ? '' : 'dead'} ${a === sim.player ? 'me' : ''}"><td>${a.name}${a.hasBomb ? ' ◆' : a.kit ? ' ✚' : ''}</td><td class="num">${a.kills}</td><td class="num">${a.deaths}</td><td class="num">${ours(team) && a.alive ? `$${loadout(a)}` : ''}</td><td class="num">${ours(team) ? `$${a.money}` : ''}</td></tr>`)
       .join('');
-    const table = (team) => `<table><thead><tr><th class="${teamClass(team)}">${TEAMS[team]} · ${round.score[team]}</th><th class="num">K</th><th class="num">D</th><th class="num">Money</th></tr></thead><tbody>${rows(team)}</tbody></table>`;
+    const economy = (team) => {
+      if (!ours(team)) return '';
+      const bank = members(team).reduce((sum, a) => sum + a.money, 0);
+      const gear = members(team).reduce((sum, a) => sum + loadout(a), 0);
+      return `<tfoot><tr><td colspan="5">Team bank $${bank} · Gear on hand $${gear} · Next loss pays $${lossBonus(round.lossStreak[team])} each</td></tr></tfoot>`;
+    };
+    const table = (team) => `<table><thead><tr><th class="${teamClass(team)}">${TEAMS[team]} · ${round.score[team]}</th><th class="num">K</th><th class="num">D</th><th class="num">${ours(team) ? 'Gear' : ''}</th><th class="num">Money</th></tr></thead><tbody>${rows(team)}</tbody>${economy(team)}</table>`;
     board.innerHTML = `<h2><span>Kiln Yard · Round ${round.number}</span><span>First to ${ROUNDS_TO_WIN}</span></h2>${table(RAIDERS)}${table(WARDENS)}`;
   }
 
@@ -190,9 +236,12 @@ export function createHud(sim) {
       } else if (e.type === EV.KILL) {
         addFeed(e, viewer);
       } else if (e.type === EV.CONTACT) {
-        if (viewer && e.actor.team === viewer.team) contact(e);
+        if (viewer && e.actor.team === viewer.team) contact(e, viewer);
+      } else if (e.type === EV.ALERT) {
+        if (viewer && e.actor.team === viewer.team) chargeCall(e, viewer);
       } else if (e.type === EV.ROUND_START) {
         radioTime = 0;
+        radioAlert = 0;
         showBanner(`Round ${round.number}`, round.number === 1 ? 'Pistol round. Press B to buy, then go.' : 'Buy time. Press B to open the buy menu.', 99);
         for (const item of feedItems) item.row.remove();
         feedItems.length = 0;
@@ -220,6 +269,7 @@ export function createHud(sim) {
       bannerTime -= dt;
       if (bannerTime <= 0) banner.hidden = true;
       radioTime -= dt;
+      radioAlert -= dt;
       radioShown(radioTime > 0);
       gainTime -= dt;
       if (gainTime <= 0) moneyGain.classList.remove('on');

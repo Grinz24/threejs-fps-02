@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import { EV } from './events.js';
 import { createBatch, vertexColored } from './batch.js';
-import { SMOKE_RADIUS, SMOKE_TIME } from './grenades.js';
+import { SMOKE_RADIUS, SMOKE_TIME, predictThrow } from './grenades.js';
+import { SLOT_GRENADE } from './weapons.js';
 import { surfaceAt } from './world.js';
 
 const PUFFS_PER_SMOKE = 16;
@@ -22,6 +23,10 @@ const SURFACES = {
 // Long and thick enough to read as a streak, even in a still frame, without becoming a beam.
 const TRACER_LIFE = 0.1;
 const TRACER_WIDTH = 0.03;
+// The grenade line-up aid: a dotted arc sampled from the real flight code, every few steps.
+const ARC_STEP = 1 / 60;
+const ARC_EVERY = 2;
+const ARC_POINTS = 96;
 
 function softTexture() {
   const canvas = document.createElement('canvas');
@@ -173,6 +178,32 @@ export function createEffects(scene, sim) {
   scene.add(bomb);
   let blink = 0;
 
+  // The player's own grenade arc: dots along the flight and a ring where it will pop.
+  const arcPositions = new Float32Array(ARC_POINTS * 3);
+  const arcGeometry = new THREE.BufferGeometry();
+  arcGeometry.setAttribute('position', new THREE.BufferAttribute(arcPositions, 3));
+  const arc = new THREE.Points(arcGeometry, new THREE.PointsMaterial({ map: soft, color: new THREE.Color(PALETTE.lamp), size: 0.32, transparent: true, opacity: 0.95, depthWrite: false, fog: false }));
+  arc.frustumCulled = false;
+  arc.visible = false;
+  scene.add(arc);
+  const landing = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.lamp), transparent: true, opacity: 0.7, depthWrite: false, fog: false }));
+  landing.visible = false;
+  scene.add(landing);
+
+  function aimArc(viewer) {
+    const show = viewer !== null && viewer === sim.player && viewer.alive && viewer.slot === SLOT_GRENADE
+      && viewer.switching === 0 && viewer.nades[viewer.nade] > 0;
+    arc.visible = show;
+    landing.visible = show;
+    if (!show) return;
+    const n = predictThrow(viewer, arcPositions, ARC_STEP, ARC_EVERY);
+    // Skip the first dots, which would sit in the thrower's face.
+    arcGeometry.setDrawRange(3, Math.max(0, n - 3));
+    arcGeometry.attributes.position.needsUpdate = true;
+    const last = (n - 1) * 3;
+    landing.position.set(arcPositions[last], arcPositions[last + 1] + 0.03, arcPositions[last + 2]);
+  }
+
   function tracer(x0, y0, z0, x1, y1, z1) {
     const t = tracers[nextTracer];
     nextTracer = (nextTracer + 1) % tracers.length;
@@ -271,7 +302,9 @@ export function createEffects(scene, sim) {
       }
     },
 
-    update(dt) {
+    // viewer: the actor the camera is in, for the grenade arc.
+    update(dt, viewer = null) {
+      aimArc(viewer);
       dust.update(dt);
       glow.update(dt);
       blood.update(dt);

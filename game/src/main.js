@@ -314,7 +314,7 @@ function dispatch(e) {
 // Everything but the render: effects, bodies, HUD, radar and the camera.
 function tick(dt) {
   const viewer = match.viewer;
-  match.effects.update(dt);
+  match.effects.update(dt, viewer);
   match.characters.update(dt, view.inEyes ? viewer : null);
   match.hud.update(viewer, dt, fov);
   match.hud.toggleBoard(input.state.keys.has('Tab') || match.sim.round.state.phase === PHASE.MATCH, viewer);
