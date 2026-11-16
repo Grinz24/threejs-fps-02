@@ -31,6 +31,8 @@ const SLOT_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5 };
 const COLLAPSE_TIME = 0.42;
 const DOWN_TIME = 0.95;
 const PULLBACK_TIME = 0.5;
+// Moving to another body to watch glides there instead of cutting.
+const SWITCH_TIME = 0.35;
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seed = Number.parseInt(params.get('seed') ?? '', 10) || 1 + Math.floor(Date.now() % 9973);
@@ -54,8 +56,9 @@ const look = { x: 0, y: 0 };
 const listener = { x: 0, z: 0, yaw: 0 };
 // The presentation's own camera state: the firing shake, and who the camera was last in.
 const shake = { pitch: 0, roll: 0, push: 0, side: 1 };
-const view = { viewer: null, deadFor: 0, fallSide: 1, inEyes: true };
+const view = { viewer: null, deadFor: 0, fallSide: 1, inEyes: true, blend: 1 };
 const poseFrom = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+const switchFrom = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
 
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
@@ -246,6 +249,13 @@ function deadPose(viewer) {
 
 function placeCamera(viewer, dt) {
   const b = viewer.body;
+  // A new body to watch: remember where the camera was so it can glide over. Back in one's own
+  // eyes at a new round it cuts, as a respawn should.
+  if (view.viewer !== null && viewer !== view.viewer && !(viewer === match.sim.player && viewer.alive)) {
+    switchFrom.position.copy(camera.position);
+    switchFrom.quaternion.copy(camera.quaternion);
+    view.blend = 0;
+  } else if (viewer !== view.viewer) view.blend = 1;
   if (viewer !== view.viewer || viewer.alive) {
     view.deadFor = 0;
     // Roll away from whoever did it.
@@ -260,6 +270,12 @@ function placeCamera(viewer, dt) {
     camera.translateZ(shake.push);
   } else if (viewer === match.sim.player) deadPose(viewer);
   else orbitPose(b);
+  if (view.blend < 1) {
+    view.blend = Math.min(1, view.blend + dt / SWITCH_TIME);
+    const ease = 1 - (1 - view.blend) ** 3;
+    camera.position.lerpVectors(switchFrom.position, camera.position, ease);
+    camera.quaternion.slerpQuaternions(switchFrom.quaternion, camera.quaternion, ease);
+  }
   // Until the pull-back starts the camera is still in the dead body's head.
   view.inEyes = viewer.alive || (viewer === match.sim.player && view.deadFor < DOWN_TIME + 0.2);
   const fade = Math.exp(-dt * 20);
@@ -320,7 +336,8 @@ function tick(dt) {
   match.hud.toggleBoard(input.state.keys.has('Tab') || match.sim.round.state.phase === PHASE.MATCH, viewer);
   match.radar.update(viewer, dt, playerSees);
   placeCamera(viewer, dt);
-  match.armsVisible = viewmodel.update(viewer, dt, camera);
+  // The arms appear once the glide to a new body has landed.
+  match.armsVisible = viewmodel.update(viewer, dt, camera) && view.blend >= 1;
 }
 
 // Before a match: a slow drift over the yard behind the menu.

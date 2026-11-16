@@ -14,6 +14,8 @@ import { TEAM_SIZE } from './sim.js';
 const $ = (id) => document.getElementById(id);
 const FEED_TIME = 7;
 const RADIO_TIME = 3;
+// How long a damage number stays up after its hit marker goes.
+const NUMBER_LINGER = 0.45;
 const ALERT_TIME = 4.5;
 // What a teammate shouts about the charge, by ALERT kind.
 const ALERT_LINES = ['Planting at {place}!', 'Defusing at {place}! Stop them!', 'Charge spotted at {place}'];
@@ -51,6 +53,7 @@ const shown = (el) => cached((on) => { el.hidden = !on; });
 export function createHud(sim) {
   const round = sim.round.state;
   const hitmarker = $('hitmarker');
+  const hitNumber = $('hit-number');
   const banner = $('banner');
   const feed = $('feed');
   const board = $('board');
@@ -106,6 +109,7 @@ export function createHud(sim) {
   const slots = [...document.querySelectorAll('#slots span')].map((el) => ({ on: toggle(el, 'on'), has: shown(el) }));
   const feedItems = [];
   let hitTime = 0;
+  let hitTotal = 0;
   let hurtFlash = 0;
   let bannerTime = 0;
   let gainTime = 0;
@@ -228,9 +232,15 @@ export function createHud(sim) {
     onEvent(e, viewer) {
       if (e.type === EV.HIT) {
         if (viewer && e.actor === viewer) {
+          // Hits landing while the last number is still up add to it, so a spray reads as one total.
+          hitTotal = hitTime > -NUMBER_LINGER ? hitTotal + e.a : e.a;
           hitTime = 0.12;
           hitmarker.classList.add('on');
           hitmarker.classList.toggle('kill', e.target.hp <= 0);
+          hitNumber.textContent = String(hitTotal);
+          hitNumber.classList.add('on');
+          hitNumber.classList.toggle('head', e.b === 1);
+          hitNumber.classList.toggle('kill', e.target.hp <= 0);
         }
         if (viewer && e.target === viewer) hurtFlash = 0.5;
       } else if (e.type === EV.KILL) {
@@ -275,6 +285,8 @@ export function createHud(sim) {
       if (gainTime <= 0) moneyGain.classList.remove('on');
       hitTime -= dt;
       if (hitTime <= 0) hitmarker.classList.remove('on');
+      // The damage number holds a little past the marker, then floats down and fades (CSS).
+      if (hitTime <= -NUMBER_LINGER) hitNumber.classList.remove('on');
       for (let i = feedItems.length - 1; i >= 0; i -= 1) {
         const item = feedItems[i];
         item.age += dt;
