@@ -74,6 +74,7 @@ export function createHud(sim) {
     flash: style($('flash'), 'opacity', hundredths),
     using: shown($('progress')),
     progress: style($('progress').firstElementChild, 'width', (v) => `${v}%`),
+    reloadBar: toggle($('progress'), 'reload'),
     crosshair: shown($('crosshair')),
     gap: cached((gap) => {
       ticks[0].style.transform = `translateY(${-gap - 8}px)`;
@@ -273,8 +274,12 @@ export function createHud(sim) {
       ui.hurt(viewer.alive ? Math.round(Math.min(1, hurtFlash * 1.6) * 100) : 60);
       ui.flash(Math.round(Math.min(1, viewer.blind / 2.2) * 100));
       ui.prompt(prompt(viewer));
-      ui.using(viewer.using > 0);
+      // The same bar fills for a plant or defuse and for a reload, in the gun's own time.
+      const reloading = viewer.alive && viewer.reloading > 0 && gun !== null && gun.def.kind === 'gun';
+      ui.using(viewer.using > 0 || reloading);
+      ui.reloadBar(reloading && viewer.using === 0);
       if (viewer.using > 0) ui.progress(Math.round(viewer.using * 100));
+      else if (reloading) ui.progress(Math.round((1 - viewer.reloading / gun.def.reload) * 100));
       ui.spectating(viewer !== sim.player);
       ui.spectate(viewer.id);
     },

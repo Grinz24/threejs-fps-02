@@ -154,6 +154,17 @@ export function raycast(ox, oy, oz, dx, dy, dz, maxDist, hit) {
   return maxDist;
 }
 
+// What a surface is made of, from where a ray met it and the normal it left: the column behind
+// a wall face, the floor of the cell under an upward face, the tunnel roof for a downward one.
+const TILE_SURFACE = { '#': 'plaster', c: 'wood', C: 'metal', h: 'concrete', ',': 'concrete', a: 'stone', b: 'stone', '.': 'sand' };
+export function surfaceAt(x, y, z, nx, ny, nz) {
+  if (ny < -0.5) return 'concrete';
+  const ch = tileAt(cellIndex(x - nx * 0.05, z - nz * 0.05));
+  // Buildings stand on a stone plinth and wear stone caps; the plaster is in between.
+  if (ch === '#' && (y < 0.55 || ny > 0.5)) return 'stone';
+  return TILE_SURFACE[ch] ?? 'sand';
+}
+
 const sightHit = { nx: 0, ny: 0, nz: 0 };
 export function clearLine(ax, ay, az, bx, by, bz) {
   const dx = bx - ax;

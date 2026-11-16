@@ -111,6 +111,8 @@ export function createCharacters(scene, sim) {
       for (const m of models) {
         const a = m.actor;
         const b = a.body;
+        // The fall runs even while hidden, so a body the camera has just left is already down.
+        m.fall = a.alive ? 0 : Math.min(1.25, m.fall + dt * 2.4);
         const visible = a !== viewer;
         m.root.visible = visible;
         if (!visible) continue;
@@ -119,17 +121,23 @@ export function createCharacters(scene, sim) {
         m.pack.visible = a.hasBomb;
         m.tag.visible = a.alive && viewer !== null && a.team === viewer.team;
         if (!a.alive) {
-          m.fall = Math.min(1, m.fall + dt * 3.2);
-          const ease = 1 - (1 - m.fall) ** 3;
+          // The knees go first, then the body tips over backwards, gathering speed, and settles
+          // with a small bounce: about 0.45 s in all, the same beat as the first-person drop.
+          const buckle = Math.min(1, m.fall / 0.3);
+          const tip = Math.min(1, Math.max(0, (m.fall - 0.15) / 0.85));
+          const bounce = m.fall > 1 ? Math.sin((m.fall - 1) * 4 * Math.PI) * 0.04 : 0;
+          const ease = tip * tip - bounce;
+          const bent = buckle * (1 - ease);
           m.root.rotation.x = ease * 1.45;
           m.root.position.y = b.y + ease * 0.16;
-          m.hips.position.y = HIP;
-          m.legL.rotation.x = 0.2;
-          m.legR.rotation.x = -0.1;
-          m.torso.rotation.x = 0;
+          m.hips.position.y = HIP - bent * 0.3;
+          m.legL.rotation.x = 0.2 * ease - bent * 0.8;
+          m.legR.rotation.x = -0.1 * ease - bent * 0.6;
+          m.legL.scale.y = 1;
+          m.legR.scale.y = 1;
+          m.torso.rotation.x = bent * 0.35;
           continue;
         }
-        m.fall = 0;
         m.root.rotation.x = 0;
         const speed = groundSpeed(b);
         m.stride += dt * (2.2 + speed * 1.55);

@@ -19,6 +19,7 @@ import { TEAMS } from './level.js';
 import { clearLine } from './world.js';
 import { eyeHeight } from './movement.js';
 import { stage } from './shot.js';
+import { WEAPONS } from './weapons.js';
 
 const FIXED_STEP = 1 / 60;
 const MAX_STEPS = 5;
@@ -26,6 +27,10 @@ const FOV = 78;
 const SCOPED_FOV = 22;
 const SENSITIVITY = 0.0022;
 const SLOT_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5 };
+// A death in the player's eyes: the drop, the time spent on the ground, the pull-back to the body.
+const COLLAPSE_TIME = 0.42;
+const DOWN_TIME = 0.95;
+const PULLBACK_TIME = 0.5;
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seed = Number.parseInt(params.get('seed') ?? '', 10) || 1 + Math.floor(Date.now() % 9973);
@@ -47,6 +52,10 @@ const viewmodel = createViewmodel(camera.aspect);
 const audio = createAudio();
 const look = { x: 0, y: 0 };
 const listener = { x: 0, z: 0, yaw: 0 };
+// The presentation's own camera state: the firing shake, and who the camera was last in.
+const shake = { pitch: 0, roll: 0, push: 0, side: 1 };
+const view = { viewer: null, deadFor: 0, fallSide: 1, inEyes: true };
+const poseFrom = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
 
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
@@ -190,15 +199,73 @@ function chooseViewer(now) {
   return viewer;
 }
 
+// Firing shoves the camera a little on top of the aim punch the bullets follow. This is look
+// only: it is added after the aim is placed and never feeds back into the simulation.
+function kickCamera(weaponId) {
+  const def = WEAPONS[weaponId];
+  const k = Math.min(1, (def?.kick ?? 0.02) * 22 + 0.25);
+  shake.side = -shake.side;
+  shake.pitch = Math.min(0.035, shake.pitch + 0.012 * k);
+  shake.roll = Math.max(-0.02, Math.min(0.02, shake.roll + 0.008 * k * shake.side));
+  shake.push = Math.min(0.08, shake.push + 0.03 * k);
+}
+
+function eyePose(viewer) {
+  const b = viewer.body;
+  camera.position.set(b.x, b.y + eyeHeight(b), b.z);
+  camera.rotation.set(b.pitch + viewer.punchPitch, b.yaw + viewer.punchYaw, 0, 'YXZ');
+}
+
+function orbitPose(b) {
+  camera.position.set(b.x + Math.sin(b.yaw) * 2.6, b.y + 2.3, b.z + Math.cos(b.yaw) * 2.6);
+  camera.lookAt(b.x, b.y + 0.3, b.z);
+}
+
+// A death topples the eyes over backwards the way the body falls (characters.js), rolling as
+// they go, holds a beat on the ground, then pulls back to look at the body.
+function deadPose(viewer) {
+  const b = viewer.body;
+  const fall = Math.min(1, view.deadFor / COLLAPSE_TIME);
+  // Accelerating like a fall, with a small bounce as the head lands.
+  const drop = fall * fall - Math.sin(Math.min(1, Math.max(0, (view.deadFor - COLLAPSE_TIME) / 0.18)) * Math.PI) * 0.05;
+  const eye = eyeHeight(b);
+  const arc = drop * 1.3;
+  const back = Math.sin(arc) * eye;
+  camera.position.set(b.x + Math.sin(b.yaw) * back, b.y + 0.22 + Math.cos(arc) * (eye - 0.22), b.z + Math.cos(b.yaw) * back);
+  camera.rotation.set(b.pitch * (1 - drop) + 0.3 * drop, b.yaw, 0.5 * drop * view.fallSide, 'YXZ');
+  const out = (view.deadFor - DOWN_TIME) / PULLBACK_TIME;
+  if (out <= 0) return;
+  const t = Math.min(1, out);
+  const ease = t * t * (3 - 2 * t);
+  poseFrom.position.copy(camera.position);
+  poseFrom.quaternion.copy(camera.quaternion);
+  orbitPose(b);
+  camera.position.lerpVectors(poseFrom.position, camera.position, ease);
+  camera.quaternion.slerpQuaternions(poseFrom.quaternion, camera.quaternion, ease);
+}
+
 function placeCamera(viewer, dt) {
   const b = viewer.body;
+  if (viewer !== view.viewer || viewer.alive) {
+    view.deadFor = 0;
+    // Roll away from whoever did it.
+    view.fallSide = Math.sin(viewer.hurtFrom - b.yaw) > 0 ? -1 : 1;
+  } else view.deadFor += dt;
+  view.viewer = viewer;
   if (viewer.alive) {
-    camera.position.set(b.x, b.y + eyeHeight(b), b.z);
-    camera.rotation.set(b.pitch + viewer.punchPitch, b.yaw + viewer.punchYaw, 0, 'YXZ');
-  } else {
-    camera.position.set(b.x + Math.sin(b.yaw) * 2.6, b.y + 2.3, b.z + Math.cos(b.yaw) * 2.6);
-    camera.lookAt(b.x, b.y + 0.3, b.z);
-  }
+    eyePose(viewer);
+    const zoom = fov / FOV;
+    camera.rotation.x += shake.pitch * zoom;
+    camera.rotation.z += shake.roll * zoom;
+    camera.translateZ(shake.push);
+  } else if (viewer === match.sim.player) deadPose(viewer);
+  else orbitPose(b);
+  // Until the pull-back starts the camera is still in the dead body's head.
+  view.inEyes = viewer.alive || (viewer === match.sim.player && view.deadFor < DOWN_TIME + 0.2);
+  const fade = Math.exp(-dt * 20);
+  shake.pitch *= fade;
+  shake.roll *= fade;
+  shake.push *= fade;
   const target = viewer.alive && viewer.scoped ? SCOPED_FOV : FOV;
   fov += (target - fov) * Math.min(1, dt * 18);
   if (Math.abs(camera.fov - fov) > 0.01) {
@@ -228,7 +295,10 @@ function dispatch(e) {
   match.hud.onEvent(e, viewer);
   audio.onEvent(e, listener, viewer);
   if (e.actor === viewer) {
-    if (e.type === EV.SHOT) viewmodel.fire();
+    if (e.type === EV.SHOT) {
+      viewmodel.fire();
+      kickCamera(e.weapon);
+    }
     else if (e.type === EV.SWING) viewmodel.swing();
     else if (e.type === EV.THROW) viewmodel.toss();
   }
@@ -245,7 +315,7 @@ function dispatch(e) {
 function tick(dt) {
   const viewer = match.viewer;
   match.effects.update(dt);
-  match.characters.update(dt, viewer && viewer.alive ? viewer : null);
+  match.characters.update(dt, view.inEyes ? viewer : null);
   match.hud.update(viewer, dt, fov);
   match.hud.toggleBoard(input.state.keys.has('Tab') || match.sim.round.state.phase === PHASE.MATCH, viewer);
   match.radar.update(viewer, dt, playerSees);

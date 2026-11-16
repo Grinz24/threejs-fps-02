@@ -6,8 +6,19 @@ import { PALETTE } from './palette.js';
 import { EV } from './events.js';
 import { createBatch, vertexColored } from './batch.js';
 import { SMOKE_RADIUS, SMOKE_TIME } from './grenades.js';
+import { surfaceAt } from './world.js';
 
 const PUFFS_PER_SMOKE = 16;
+// How each surface takes a bullet: the hole's shade, the dust it throws and how many sparks.
+// Soft stuff (sand, plaster) puffs big and slow; wood splinters tight; metal barely dusts but sparks.
+const SURFACES = {
+  plaster: { hole: PALETTE.stoneShade, holeAlpha: 0.9, dust: PALETTE.plaster, dustAlpha: 0.8, life: 0.55, size: 0.7, spread: 0.8, sparks: 0 },
+  stone: { hole: PALETTE.wood, holeAlpha: 0.85, dust: PALETTE.stoneCap, dustAlpha: 0.75, life: 0.5, size: 0.6, spread: 0.8, sparks: 0 },
+  sand: { hole: PALETTE.sandDark, holeAlpha: 0.9, dust: PALETTE.sand, dustAlpha: 0.85, life: 0.65, size: 0.8, spread: 0.6, sparks: 0 },
+  concrete: { hole: PALETTE.concreteDark, holeAlpha: 0.9, dust: PALETTE.concrete, dustAlpha: 0.8, life: 0.5, size: 0.6, spread: 0.8, sparks: 0 },
+  wood: { hole: PALETTE.raiderDark, holeAlpha: 0.9, dust: PALETTE.woodLight, dustAlpha: 0.7, life: 0.35, size: 0.35, spread: 1.3, sparks: 0 },
+  metal: { hole: PALETTE.gear, holeAlpha: 0.85, dust: PALETTE.metalLight, dustAlpha: 0.45, life: 0.25, size: 0.3, spread: 1, sparks: 4 },
+};
 // Long and thick enough to read as a streak, even in a still frame, without becoming a beam.
 const TRACER_LIFE = 0.1;
 const TRACER_WIDTH = 0.03;
@@ -83,7 +94,7 @@ function spritePool(scene, count, texture, blending, fog = true) {
 export function createEffects(scene, sim) {
   const soft = softTexture();
   const dust = spritePool(scene, 48, soft, THREE.NormalBlending);
-  const glow = spritePool(scene, 24, soft, THREE.AdditiveBlending, false);
+  const glow = spritePool(scene, 40, soft, THREE.AdditiveBlending, false);
   const blood = spritePool(scene, 24, soft, THREE.NormalBlending);
 
   // Tracers: thin additive bars stretched from muzzle to impact.
@@ -97,12 +108,16 @@ export function createEffects(scene, sim) {
   }
   let nextTracer = 0;
 
-  // Bullet holes: small dark squares laid on the surface they hit.
+  // Bullet holes: small dark squares laid on the surface they hit, in a darker shade of it.
   const holeGeometry = new THREE.PlaneGeometry(0.09, 0.09);
-  const holeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.gear), transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const holeMaterials = {};
+  for (const kind in SURFACES) {
+    const { hole, holeAlpha } = SURFACES[kind];
+    holeMaterials[kind] = new THREE.MeshBasicMaterial({ color: new THREE.Color(hole), transparent: true, opacity: holeAlpha, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  }
   const holes = [];
   for (let i = 0; i < 96; i += 1) {
-    const mesh = new THREE.Mesh(holeGeometry, holeMaterial);
+    const mesh = new THREE.Mesh(holeGeometry, holeMaterials.plaster);
     mesh.visible = false;
     scene.add(mesh);
     holes.push(mesh);
@@ -176,12 +191,33 @@ export function createEffects(scene, sim) {
     t.life = TRACER_LIFE;
   }
 
-  function hole(e) {
+  function hole(e, kind) {
     const mesh = holes[nextHole];
     nextHole = (nextHole + 1) % holes.length;
+    mesh.material = holeMaterials[kind];
     mesh.position.set(e.x + e.a * 0.01, e.y + e.b * 0.01, e.z + e.c * 0.01);
     mesh.lookAt(e.x + e.a, e.y + e.b, e.z + e.c);
     mesh.visible = true;
+  }
+
+  // What flies off the surface: a puff in its own colour, and on metal a spray of sparks.
+  function impact(e, kind) {
+    const s = SURFACES[kind];
+    // A stable per-impact pick, so the look never draws from the simulation's RNG.
+    const roll = Math.abs(e.x * 13 + e.y * 5 + e.z * 7) % 3;
+    dust.spawn(e.x, e.y, e.z, s.dust, s.life, 0.1, s.size, s.dustAlpha, e.a * s.spread, 0.4 + e.b * 0.6, e.c * s.spread);
+    if (s.sparks === 0) {
+      if (roll < 1) glow.spawn(e.x, e.y, e.z, PALETTE.flash, 0.05, 0.08, 0.16, 1);
+      return;
+    }
+    glow.spawn(e.x, e.y, e.z, '#ffffff', 0.06, 0.12, 0.3, 1);
+    for (let k = 0; k < s.sparks; k += 1) {
+      // Fan the sparks off the normal, each a different way round it.
+      const a = roll * 2.1 + k * 2.4;
+      const vx = e.a * 3 + Math.cos(a) * 2.2;
+      const vz = e.c * 3 + Math.sin(a) * 2.2;
+      glow.spawn(e.x, e.y, e.z, k % 2 ? PALETTE.flash : PALETTE.lamp, 0.12 + k * 0.03, 0.06, 0.03, 1, vx, 1.2 + e.b * 2 + k * 0.4, vz);
+    }
   }
 
   function blast(e) {
@@ -214,9 +250,9 @@ export function createEffects(scene, sim) {
           glow.spawn(e.x - Math.sin(b.yaw) * 0.85, e.y - 0.28, e.z - Math.cos(b.yaw) * 0.85, PALETTE.flash, 0.06, 0.35, 0.55, 1);
         }
       } else if (e.type === EV.IMPACT) {
-        hole(e);
-        dust.spawn(e.x, e.y, e.z, PALETTE.sand, 0.5, 0.1, 0.6, 0.8, e.a * 0.8, 0.4 + e.b * 0.6, e.c * 0.8);
-        if ((e.x * 13 + e.z * 7) % 3 < 1) glow.spawn(e.x, e.y, e.z, PALETTE.flash, 0.05, 0.08, 0.16, 1);
+        const kind = surfaceAt(e.x, e.y, e.z, e.a, e.b, e.c);
+        hole(e, kind);
+        impact(e, kind);
       } else if (e.type === EV.HIT) {
         const b = e.target.body;
         const y = e.b === 1 ? b.y + 1.6 - b.crouch * 0.4 : b.y + 1.15 - b.crouch * 0.35;
