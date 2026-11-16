@@ -1,6 +1,7 @@
 // Every sound is synthesised with Web Audio from oscillators and one baked noise buffer: no
 // files, no network. Sounds are placed by distance and side relative to the listener (the
-// actor the camera follows), and far gunfire loses its top end the way it does outdoors.
+// actor the camera follows), and far gunfire loses its top end the way it does outdoors. A
+// quiet wind bed runs underneath from the first click.
 import { EV } from './events.js';
 import { WEAPONS } from './weapons.js';
 
@@ -29,6 +30,47 @@ export function createAudio() {
       seed = (Math.imul(seed, 1103515245) + 12345) | 0;
       data[i] = ((seed >>> 8) & 0xffff) / 32768 - 1;
     }
+    ambience();
+  }
+
+  // A low desert wind under everything, for as long as the context lives: the noise looped
+  // slow through a lowpass whose cutoff breathes on a slow oscillator, a thinner gust band
+  // swelling on another, and the whole bed drifting between the ears. Kept far under the
+  // compressor's threshold so it never pumps against the gunfire.
+  function ambience() {
+    const bed = ctx.createGain();
+    bed.gain.value = 0.09;
+    const drift = ctx.createStereoPanner();
+    bed.connect(drift).connect(master);
+    const lfo = (frequency, depth, target) => {
+      const osc = ctx.createOscillator();
+      osc.frequency.value = frequency;
+      const amount = ctx.createGain();
+      amount.gain.value = depth;
+      osc.connect(amount).connect(target);
+      osc.start();
+    };
+    const loop = (rate, type, frequency, q, level) => {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      src.loop = true;
+      src.playbackRate.value = rate;
+      const filter = ctx.createBiquadFilter();
+      filter.type = type;
+      filter.frequency.value = frequency;
+      filter.Q.value = q;
+      const gain = ctx.createGain();
+      gain.gain.value = level;
+      src.connect(filter).connect(gain).connect(bed);
+      src.start();
+      return { filter, gain };
+    };
+    const wind = loop(0.37, 'lowpass', 360, 0.7, 1);
+    lfo(0.071, 150, wind.filter.frequency);
+    const gust = loop(0.53, 'bandpass', 950, 1.6, 0.22);
+    lfo(0.113, 0.18, gust.gain.gain);
+    lfo(0.19, 260, gust.filter.frequency);
+    lfo(0.031, 0.35, drift.pan);
   }
 
   // A voice: gain envelope into a stereo panner into the master bus.

@@ -47,7 +47,7 @@ document.getElementById('game').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.05, 900);
-buildMap(scene);
+const world = buildMap(scene);
 const viewmodel = createViewmodel(camera.aspect);
 const audio = createAudio();
 const look = { x: 0, y: 0 };
@@ -334,6 +334,7 @@ function draw(dt, now = 0) {
   const viewer = match ? match.viewer : null;
   if (match) tick(dt);
   else attract(now);
+  world.update(dt, match ? match.sim.round.state : null);
   renderer.clear();
   renderer.render(scene, camera);
   if (match && match.armsVisible) {

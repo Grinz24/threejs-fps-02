@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import { CELL, ROOF_HEIGHT, SITES } from './level.js';
+import { BOMB_TIME } from './round.js';
 import { rects, cellX, cellZ, COLS, ROWS, tileAt, cellIndex } from './world.js';
 import { createBatch, vertexColored } from './batch.js';
 
@@ -185,7 +186,8 @@ function tunnelRoof(batch, glow, r) {
   }
 }
 
-// A stencilled site letter on the floor, drawn once to a canvas.
+// A stencilled site letter on the floor, drawn once to a canvas. The letter's own texture is
+// its glow map, so once the charge is down there the paint itself pulses.
 function siteDecal(scene, site) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
@@ -205,12 +207,13 @@ function siteDecal(scene, site) {
   texture.colorSpace = THREE.SRGBColorSpace;
   const decal = new THREE.Mesh(
     new THREE.PlaneGeometry(4.2, 4.2),
-    new THREE.MeshStandardMaterial({ map: texture, transparent: true, opacity: 0.82, roughness: 1, depthWrite: false }),
+    new THREE.MeshStandardMaterial({ map: texture, emissiveMap: texture, emissive: new THREE.Color(0x000000), transparent: true, opacity: 0.82, roughness: 1, depthWrite: false }),
   );
   decal.rotation.x = -Math.PI / 2;
   decal.position.set(cellX(site.plant[0]), 0.02, cellZ(site.plant[1]));
   decal.receiveShadow = true;
   scene.add(decal);
+  return decal.material;
 }
 
 function chimney(batch, x, z, height) {
@@ -260,6 +263,99 @@ function mesas(batch) {
   }
 }
 
+function softTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const g = canvas.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.6, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+// A banner on a pole on top of a chimney, rippling in the evening wind. Its cloth is a small
+// grid whose vertices are pushed each frame; the base shape is kept to wave from.
+const FLAG_LENGTH = 4.4;
+const FLAG_DROP = 2.3;
+function banner(scene, x, z, height, hex, phase) {
+  const group = new THREE.Group();
+  group.position.set(x, height + 0.6, z);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 6.4, 6).translate(0, 3.2, 0), new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.metal) }));
+  pole.castShadow = true;
+  group.add(pole);
+  const geometry = new THREE.PlaneGeometry(FLAG_LENGTH, FLAG_DROP, 14, 5).translate(FLAG_LENGTH / 2 + 0.06, 6.3 - FLAG_DROP / 2, 0);
+  const cloth = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: new THREE.Color(hex), side: THREE.DoubleSide, roughness: 0.9 }));
+  cloth.castShadow = true;
+  group.add(cloth);
+  scene.add(group);
+  const base = Float32Array.from(geometry.attributes.position.array);
+  return { group, geometry, base, phase };
+}
+
+// The wind blows from the sun's side of the sky, so flags stream away from it (the cloth runs
+// along its local +x) and swing a little about that heading.
+const WIND_YAW = Math.atan2(0.66, 0.62);
+function waveBanner(f, t) {
+  const position = f.geometry.attributes.position;
+  const a = position.array;
+  for (let i = 0; i < a.length; i += 3) {
+    const along = Math.max(0, f.base[i] - 0.06) / FLAG_LENGTH;
+    const y = f.base[i + 1];
+    // Ripples run out from the pole and grow toward the free end, which also droops a touch.
+    const wave = Math.sin(along * 7 - t * 5.2 + f.phase) + Math.sin(along * 3.1 - t * 2.3 + y * 0.8 + f.phase) * 0.5;
+    a[i + 2] = wave * 0.22 * along;
+    a[i] = f.base[i] - along * along * 0.15;
+    a[i + 1] = y - along * along * 0.25 + Math.sin(t * 1.7 + f.phase) * 0.06 * along;
+  }
+  position.needsUpdate = true;
+  f.geometry.computeVertexNormals();
+  f.group.rotation.y = WIND_YAW + Math.sin(t * 0.37 + f.phase) * 0.22;
+}
+
+// Dust devils out on the flats among the mesas: a few columns of soft sand-coloured puffs that
+// wander slowly and twist, each puff bobbing around the column's axis.
+const DEVIL_PUFFS = 12;
+function dustDevils(scene) {
+  const texture = softTexture();
+  const devils = [];
+  for (let k = 0; k < 4; k += 1) {
+    const puffs = [];
+    for (let p = 0; p < DEVIL_PUFFS; p += 1) {
+      // Pale against the darker mesas behind them.
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, color: new THREE.Color(p % 3 ? PALETTE.stoneCap : PALETTE.plaster), transparent: true, depthWrite: false, fog: false }));
+      scene.add(sprite);
+      puffs.push(sprite);
+    }
+    devils.push({ puffs, angle: (k / 4) * Math.PI * 2 + 0.6 + hash(k, 21) * 0.8, dist: 105 + hash(k, 22) * 50, speed: (hash(k, 23) - 0.5) * 0.012, phase: k * 1.9 });
+  }
+  return devils;
+}
+
+function stirDevils(devils, t) {
+  for (const d of devils) {
+    const angle = d.angle + t * d.speed;
+    const cx = Math.cos(angle) * (d.dist + Math.sin(t * 0.05 + d.phase) * 10);
+    const cz = Math.sin(angle) * (d.dist + Math.sin(t * 0.05 + d.phase) * 10);
+    // Each devil rises and fades over a slow cycle so the horizon never looks frozen.
+    const life = 0.5 + 0.5 * Math.sin(t * 0.09 + d.phase);
+    for (let p = 0; p < d.puffs.length; p += 1) {
+      const sprite = d.puffs[p];
+      const h = p / (d.puffs.length - 1);
+      const spin = t * 2.2 + p * 0.9 + d.phase;
+      const r = 0.8 + h * h * 6;
+      sprite.position.set(cx + Math.cos(spin) * r, 2 + h * 26 * (0.6 + life * 0.4), cz + Math.sin(spin) * r);
+      sprite.scale.setScalar(5 + h * 11);
+      sprite.material.opacity = (0.62 - h * 0.34) * (0.35 + life * 0.65);
+    }
+  }
+}
+
 export const SUN_DIRECTION = new THREE.Vector3(-0.62, 0.42, 0.66).normalize();
 
 export function buildMap(scene) {
@@ -272,8 +368,10 @@ export function buildMap(scene) {
   sun.position.copy(SUN_DIRECTION).multiplyScalar(90);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  const extent = 62;
-  Object.assign(sun.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 10, far: 200 });
+  // The shadow box is fitted to the yard as the sun sees it (every wall and chimney top lands
+  // within x ±61, y -26..42, depth 31..145): a square box twice as tall would waste half the
+  // map's texels along the sun's direction, which is the axis stretched most over the ground.
+  Object.assign(sun.shadow.camera, { left: -63, right: 63, top: 44, bottom: -28, near: 20, far: 160 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
@@ -314,5 +412,38 @@ export function buildMap(scene) {
   const farMesh = new THREE.Mesh(far.build(), vertexColored({ roughness: 1 }));
   scene.add(solidMesh, groundMesh, glowMesh, farMesh);
 
-  for (const site of SITES) siteDecal(scene, site);
+  const decals = SITES.map((site) => siteDecal(scene, site));
+  const banners = [
+    banner(scene, cellX(33), cellZ(20), 30, PALETTE.terracotta, 0),
+    banner(scene, cellX(13), cellZ(24), 24, PALETTE.teal, 2.1),
+  ];
+  const devils = dustDevils(scene);
+  const glowColor = new THREE.Color();
+  const white = new THREE.Color(0xffffff);
+  let time = 0;
+
+  return {
+    // The map's few moving parts, once a frame: the banners, the dust devils and, while the
+    // charge is down at a site, that site's letter pulsing in its colour, quicker as time runs out.
+    update(dt, round = null) {
+      time += dt;
+      for (const f of banners) waveBanner(f, time);
+      stirDevils(devils, time);
+      const bomb = round ? round.bomb : null;
+      for (let s = 0; s < decals.length; s += 1) {
+        const material = decals[s];
+        const live = bomb !== null && bomb.state === 'planted' && bomb.site === s;
+        if (!live) {
+          material.emissive.setRGB(0, 0, 0);
+          material.opacity = 0.82;
+          continue;
+        }
+        const urgency = 1 - Math.max(0, bomb.timer) / BOMB_TIME;
+        const pulse = 0.5 + 0.5 * Math.sin(time * (3 + urgency * 9));
+        // The site's colour lifted toward white, so even the dark teal of A reads as lit.
+        material.emissive.copy(glowColor.set(SITE_TONES[SITES[s].tile]).lerp(white, 0.45)).multiplyScalar(0.25 + pulse * 1.1);
+        material.opacity = 0.85 + pulse * 0.15;
+      }
+    },
+  };
 }
